@@ -1,0 +1,30 @@
+{
+  "name": "mc-bedrock-custom-mechanics",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Minecraft Bedrock Dedicated Server с кастомными механиками на TypeScript (Script API) для Nintendo Switch и PlayStation 5.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "clean": "node tools/clean.mjs",
+    "check:manifest": "node tools/check-manifest.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --import ./tests/register.mjs tests/engine.test.mjs",
+    "build": "npm run clean && npm run check:manifest && tsc",
+    "watch": "tsc --watch",
+    "pack:activate": "node tools/activate-pack.mjs",
+    "server:up": "docker compose up -d",
+    "server:down": "docker compose down",
+    "server:restart": "docker restart bds",
+    "server:logs": "docker logs --tail 50 -f bds",
+    "dev": "npm run build && npm run server:restart"
+  },
+  "devDependencies": {
+    "@minecraft/server": "2.9.0",
+    "@minecraft/server-ui": "2.1.0",
+    "typescript": "^5.9.3"
+  }
+}
