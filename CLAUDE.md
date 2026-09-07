@@ -3,7 +3,9 @@
 ## Project Context
 
 - **Target:** Minecraft Bedrock Dedicated Server (BDS) в Docker.
-- **Client Platforms:** Nintendo Switch и PlayStation 5 через LAN-прокси Phantom.
+- **Client Platforms:** PlayStation 5 через LAN-прокси Phantom; Nintendo Switch
+  через BedrockConnect — **Phantom Switch не поддерживает** («Nintendo Switch is
+  not supported» в его README). Подробности и порты — в README.
 - **Core Technology:** TypeScript → JavaScript (ES2020) для `@minecraft/server` (Bedrock Script API).
 - **Environment:** локальная разработка в Docker на macOS → продакшн на Ubuntu VPS (DigitalOcean, Frankfurt).
 
@@ -32,6 +34,8 @@ MinecraftServer/
 ├── CLAUDE.md                   # Этот файл
 ├── README.md                   # Руководство по настройке и эксплуатации
 ├── docker-compose.yml          # Определение локального и продакшн-сервера
+│                               # Локально BDS слушает хост-порт 19133:
+│                               # 19132 занимает Phantom (см. .env.example)
 ├── package.json                # Зависимости и скрипты
 ├── tsconfig.json               # Конфигурация сборки TypeScript
 ├── addon/                      # Behavior Pack (монтируется в контейнер)
