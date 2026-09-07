@@ -19,7 +19,8 @@
 | Только проверка типов | `npm run typecheck` |
 | Тесты движка | `npm test` (сборка + прогон на моках API) |
 | Активация пака в мире | `npm run pack:activate` |
-| Поднять сервер | `npm run server:up` |
+| Проверить порты в `.env` | `npm run check:env` |
+| Поднять сервер | `npm run server:up` (check:env → `docker compose up -d`) |
 | Перезапуск сервера | `npm run server:restart` (`docker restart bds`) |
 | Логи сервера | `npm run server:logs` (`docker logs --tail 50 -f bds`) |
 | Пересобрать и перезапустить | `npm run dev` |
@@ -49,6 +50,8 @@ MinecraftServer/
 │   │   └── types/runtime.d.ts  # Объявления среды QuickJS (console)
 │   └── scripts/                # Скомпилированный JS (генерируется, в git не хранится)
 ├── tools/                      # Хостовые скрипты (Node.js/bash — НЕ для движка)
+│                               # env.mjs — общий разбор .env
+│                               # check-env.mjs — сверка портов до запуска
 └── deploy/bootstrap-vps.sh     # Первичная настройка дроплета
 ```
 

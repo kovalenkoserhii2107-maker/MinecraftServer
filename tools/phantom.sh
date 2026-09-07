@@ -83,6 +83,39 @@ if [ ! -x "$PHANTOM_BIN" ]; then
   exit 1
 fi
 
+# Предстартовая проверка: Phantom обязан занять UDP 19132, и если порт уже
+# занят, он падает с "address already in use" — сообщением, по которому
+# непонятно ни кто виноват, ни что делать. Разбираемся здесь.
+if command -v lsof >/dev/null 2>&1; then
+  # `|| true` обязателен: при свободном порте lsof выходит с кодом 1, а из-за
+  # `set -e` и `pipefail` это убило бы скрипт ещё до запуска Phantom.
+  HOLDER="$(lsof -nP -iUDP:19132 2>/dev/null | awk 'NR>1 {print $1; exit}' || true)"
+  if [ -n "$HOLDER" ]; then
+    echo "Порт UDP 19132 уже занят процессом: $HOLDER" >&2
+    echo >&2
+    case "$HOLDER" in
+      com.docke*|docker*|Docker*)
+        echo "Это контейнер BDS — он забрал порт, который нужен Phantom." >&2
+        echo "Проверить:  docker compose ps" >&2
+        echo >&2
+        echo "Почините .env и пересоздайте контейнер:" >&2
+        echo "  SERVER_PORT=19133" >&2
+        echo "  PHANTOM_SERVER=127.0.0.1:19133" >&2
+        echo "  docker compose up -d" >&2
+        ;;
+      phantom*)
+        echo "Phantom уже запущен в другом окне терминала." >&2
+        echo "Остановите тот процесс (Ctrl+C) или используйте его." >&2
+        ;;
+      *)
+        echo "Освободите порт или остановите этот процесс:" >&2
+        echo "  lsof -nP -iUDP:19132" >&2
+        ;;
+    esac
+    exit 1
+  fi
+fi
+
 echo "Phantom → ${SERVER}"
 echo "Откройте на PlayStation: Играть → Друзья → Игры по локальной сети."
 echo "Остановка: Ctrl+C"
