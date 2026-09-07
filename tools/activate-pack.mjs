@@ -12,31 +12,10 @@
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { PROJECT_ROOT, readEnv } from './env.mjs';
 
-const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
-/** Читает значение из .env, не подключая внешних зависимостей. */
-async function readEnv(key, fallback) {
-    if (process.env[key]) return process.env[key];
-    const envPath = join(projectRoot, '.env');
-    if (!existsSync(envPath)) return fallback;
-
-    const content = await readFile(envPath, 'utf8');
-    for (const line of content.split('\n')) {
-        const trimmed = line.trim();
-        if (trimmed === '' || trimmed.startsWith('#')) continue;
-        const separator = trimmed.indexOf('=');
-        if (separator === -1) continue;
-        if (trimmed.slice(0, separator).trim() !== key) continue;
-        return trimmed
-            .slice(separator + 1)
-            .trim()
-            .replace(/^["']|["']$/g, '');
-    }
-    return fallback;
-}
+const projectRoot = PROJECT_ROOT;
 
 const levelName = await readEnv('LEVEL_NAME', 'Bedrock level');
 const dataDir = await readEnv('SERVER_DATA_DIR', join(projectRoot, 'server-data'));

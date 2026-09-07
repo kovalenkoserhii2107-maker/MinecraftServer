@@ -335,6 +335,23 @@ UDP 19132, а этот порт локально занят Phantom, на дро
 
 ## Диагностика
 
+**Phantom падает: `listen udp4 :19132: bind: address already in use`**
+- Контейнер стартовал раньше и забрал 19132. Так бывает, если в `.env` нет
+  `SERVER_PORT` — тогда берётся значение по умолчанию из `docker-compose.yml`,
+  а оно рассчитано на VPS (19132).
+- Проверить: `docker compose ps` — в колонке портов должно быть
+  `19133->19132/udp`, а не `19132->19132/udp`.
+- Починить:
+
+  ```bash
+  printf '\nSERVER_PORT=19133\nPHANTOM_SERVER=127.0.0.1:19133\n' >> .env
+  docker compose up -d
+  ```
+
+- `npm run check:env` показывает такие расхождения до запуска, а
+  `./tools/phantom.sh` проверяет порт перед стартом и называет процесс,
+  который его держит.
+
 **Контейнер не стартует: `port is already allocated`**
 - Phantom уже занял UDP 19132 — так и задумано. У BDS в `.env` должен стоять
   `SERVER_PORT=19133`, и тот же порт — в `PHANTOM_SERVER` (`127.0.0.1:19133`).
