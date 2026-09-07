@@ -1,9 +1,9 @@
 name: CI
 
+# Раньше main покрывался деплоем (он тоже собирает и тестирует). Теперь деплой
+# запускается вручную, поэтому CI гоняем на всех ветках, включая main.
 on:
   push:
-    branches-ignore:
-      - main
   pull_request:
   workflow_dispatch:
 

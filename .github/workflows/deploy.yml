@@ -1,9 +1,10 @@
 name: Deploy to DigitalOcean
 
+# Только ручной запуск: Actions → Deploy to DigitalOcean → Run workflow.
+# Автодеплой по пушу в main включим, когда дроплет будет поднят и в репозитории
+# появятся секреты DEPLOY_HOST / DEPLOY_USER / DEPLOY_PATH / DEPLOY_SSH_KEY —
+# для этого достаточно вернуть блок `push: branches: [main]`.
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 # Параллельные деплои на один дроплет недопустимы: rsync и рестарт конфликтуют.

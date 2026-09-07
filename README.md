@@ -190,8 +190,12 @@ ssh-copy-id -i ~/.ssh/mc_deploy.pub mcdeploy@<IP_ДРОПЛЕТА>
 | `DEPLOY_SSH_KEY` | содержимое `~/.ssh/mc_deploy` (приватный ключ) |
 | `DEPLOY_PORT` | необязательно, по умолчанию `22` |
 
-Теперь пуш в `main` собирает TypeScript, доставляет `addon/scripts/` и
-`addon/manifest.json` по rsync и перезапускает контейнер.
+Деплой запускается **вручную**: GitHub → **Actions** → *Deploy to DigitalOcean* →
+**Run workflow**. Он собирает TypeScript, прогоняет тесты, доставляет
+`addon/scripts/` и `addon/manifest.json` по rsync и перезапускает контейнер.
+
+Когда дроплет будет обкатан, автодеплой по пушу в `main` включается возвратом
+блока `push: branches: [main]` в `.github/workflows/deploy.yml`.
 
 ### 6. Переключение Phantom на VPS
 
