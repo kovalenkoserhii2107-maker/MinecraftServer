@@ -81,8 +81,10 @@ cat <<EOM
 Дальнейшие шаги:
   1. Добавьте публичный SSH-ключ деплоя в
      /home/${DEPLOY_USER}/.ssh/authorized_keys
-  2. Создайте ${DEPLOY_PATH}/.env на основе .env.example
-     (обязательно укажите OPS со своим Xbox-геймертегом).
+  2. Создайте ${DEPLOY_PATH}/.env на основе .env.example:
+     • OPS — ваш Xbox-геймертег;
+     • SERVER_PORT=19132 — на дроплете Phantom не запускается, и порт свободен
+       (значение 19133 из .env.example нужно только локально на Mac).
   3. Поднимите сервер:
      sudo -u ${DEPLOY_USER} sh -c 'cd ${DEPLOY_PATH} && docker compose up -d'
   4. Активируйте behavior pack:

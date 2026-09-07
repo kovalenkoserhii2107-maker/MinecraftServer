@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 #
-# Запуск Phantom — LAN-прокси, благодаря которому сервер виден на PS5 и Switch
+# Запуск Phantom — LAN-прокси, благодаря которому сервер виден на PlayStation
 # во вкладке «Друзья» → «Игры по локальной сети».
+#
+# ВНИМАНИЕ: Nintendo Switch через Phantom не работает — авторы Phantom заявляют
+# это прямо ("Nintendo Switch is not supported"). Для Switch используется
+# BedrockConnect, см. README, раздел «Nintendo Switch».
 #
 # Консоли не умеют подключаться к произвольному IP:порту, но рассылают запросы
 # обнаружения LAN-серверов по UDP. Phantom отвечает на них от имени удалённого
 # сервера и проксирует трафик.
+#
+# Phantom сам занимает UDP 19132 на всех интерфейсах — иначе он не получит
+# broadcast от консолей. Поэтому локально BDS вешается на другой порт
+# (SERVER_PORT=19133 в .env), а сюда передаётся его адрес.
 #
 #   ./tools/phantom.sh                 # адрес берётся из .env (PHANTOM_SERVER)
 #   ./tools/phantom.sh 203.0.113.10    # явный адрес VPS
@@ -61,9 +69,9 @@ SERVER="${1:-${PHANTOM_SERVER:-}}"
 if [ -z "$SERVER" ] && [ -f .env ]; then
   SERVER="$(grep -E '^PHANTOM_SERVER=' .env | tail -n 1 | cut -d= -f2- | tr -d '"' | tr -d "'" | xargs || true)"
 fi
-SERVER="${SERVER:-127.0.0.1:19132}"
+SERVER="${SERVER:-127.0.0.1:19133}"
 
-# Порт по умолчанию, если указан только адрес.
+# Если передан только адрес — это Фаза 2 (VPS), где BDS слушает штатный 19132.
 case "$SERVER" in
   *:*) ;;
   *) SERVER="${SERVER}:19132" ;;
@@ -76,6 +84,6 @@ if [ ! -x "$PHANTOM_BIN" ]; then
 fi
 
 echo "Phantom → ${SERVER}"
-echo "Откройте на PS5/Switch: Играть → Друзья → Игры по локальной сети."
+echo "Откройте на PlayStation: Играть → Друзья → Игры по локальной сети."
 echo "Остановка: Ctrl+C"
 exec "$PHANTOM_BIN" -server "$SERVER"
