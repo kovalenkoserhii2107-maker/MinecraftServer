@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    /* Целевая среда — QuickJS внутри Minecraft Bedrock, не Node.js. */
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "lib": ["ES2020"],
+
+    /* Источники строго в addon/src, вывод строго в addon/scripts. */
+    "rootDir": "addon/src",
+    "outDir": "addon/scripts",
+
+    /* Никаких окружений Node: типы подключаются только явно. */
+    "types": [],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "declaration": false,
+    "sourceMap": false,
+    "newLine": "lf"
+  },
+  "include": ["addon/src/**/*.ts"]
+}

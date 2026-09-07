@@ -1,0 +1,50 @@
+name: CI
+
+# Деплой переведён на ручной запуск, поэтому main больше не проверяется им —
+# гоняем CI на push в main и на все pull request. Ветку с открытым PR
+# намеренно не покрываем через `push`: иначе каждый коммит запускал бы прогон
+# дважды (push + pull_request).
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Сборка и проверка типов
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      - name: Проверка типов
+        run: npm run typecheck
+
+      - name: Сборка behavior pack
+        run: npm run build
+
+      - name: Функциональные тесты движка
+        run: node --import ./tests/register.mjs tests/engine.test.mjs
+
+      - name: Проверка артефактов сборки
+        run: |
+          test -f addon/scripts/index.js || { echo "::error::addon/scripts/index.js не собран"; exit 1; }
+          # Node.js API недоступны в QuickJS: их появление в бандле — ошибка сборки.
+          if grep -rnE "from ['\"](node:|fs|path|http|https|crypto)['\"]" addon/scripts; then
+            echo "::error::В скомпилированных скриптах найден импорт Node.js-модуля"
+            exit 1
+          fi
+          echo "Собрано файлов: $(find addon/scripts -name '*.js' | wc -l)"

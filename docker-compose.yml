@@ -1,0 +1,63 @@
+# Сервер Minecraft Bedrock для локальной разработки (Фаза 1) и VPS (Фаза 2).
+#
+# Один и тот же файл используется на macOS и на Ubuntu-дроплете DigitalOcean:
+# различия вынесены в .env (см. .env.example).
+#
+#   Запуск:      docker compose up -d
+#   Логи:        docker logs --tail 50 -f bds
+#   Рестарт:     docker restart bds
+
+services:
+  bds:
+    image: itzg/minecraft-bedrock-server:latest
+    container_name: bds
+    # BDS читает команды из stdin; без этого консоль сервера недоступна.
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+    ports:
+      # Minecraft Bedrock работает поверх UDP (RakNet), не TCP.
+      - "${SERVER_PORT:-19132}:19132/udp"
+      - "${SERVER_PORT_V6:-19133}:19133/udp"
+
+    environment:
+      EULA: "TRUE"
+      VERSION: "${BDS_VERSION:-LATEST}"
+      SERVER_NAME: "${SERVER_NAME:-Custom Mechanics Server}"
+      LEVEL_NAME: "${LEVEL_NAME:-Bedrock level}"
+      GAMEMODE: "${GAMEMODE:-survival}"
+      DIFFICULTY: "${DIFFICULTY:-normal}"
+      ALLOW_CHEATS: "${ALLOW_CHEATS:-true}"
+      MAX_PLAYERS: "${MAX_PLAYERS:-6}"
+      # Консоли (PS5/Switch) входят под учётной записью Xbox Live —
+      # online-mode оставляем включённым.
+      ONLINE_MODE: "${ONLINE_MODE:-true}"
+      ALLOW_LIST: "${ALLOW_LIST:-false}"
+      # Умеренные дистанции: дроплет 1 vCPU / 2 GiB тянет их без просадок тика.
+      VIEW_DISTANCE: "${VIEW_DISTANCE:-10}"
+      TICK_DISTANCE: "${TICK_DISTANCE:-4}"
+      PLAYER_IDLE_TIMEOUT: "${PLAYER_IDLE_TIMEOUT:-0}"
+      # Список Xbox-геймертегов операторов через запятую.
+      OPS: "${OPS:-}"
+      DEFAULT_PLAYER_PERMISSION_LEVEL: "${DEFAULT_PLAYER_PERMISSION_LEVEL:-member}"
+      UID: "${UID:-1000}"
+      GID: "${GID:-1000}"
+
+    volumes:
+      # Данные сервера: миры, разрешения, конфиги. Bind mount, а не именованный
+      # том, — чтобы `npm run pack:activate` мог править world_behavior_packs.json.
+      - ./server-data:/data
+      # Behavior pack монтируется напрямую из репозитория: после `npm run build`
+      # достаточно `docker restart bds`, пересобирать образ не нужно.
+      - ./addon:/data/development_behavior_packs/custom-mechanics:ro
+
+    # Защита от одиночного «тяжёлого» тика, съедающего всю память дроплета.
+    mem_limit: "${MEM_LIMIT:-1500m}"
+
+    healthcheck:
+      test: ["CMD", "mc-monitor", "status-bedrock", "--host", "127.0.0.1", "--port", "19132"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s

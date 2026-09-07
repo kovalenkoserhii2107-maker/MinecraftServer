@@ -1,0 +1,107 @@
+name: Deploy to DigitalOcean
+
+# Только ручной запуск: Actions → Deploy to DigitalOcean → Run workflow.
+# Автодеплой по пушу в main включим, когда дроплет будет поднят и в репозитории
+# появятся секреты DEPLOY_HOST / DEPLOY_USER / DEPLOY_PATH / DEPLOY_SSH_KEY —
+# для этого достаточно вернуть блок `push: branches: [main]`.
+on:
+  workflow_dispatch:
+
+# Параллельные деплои на один дроплет недопустимы: rsync и рестарт конфликтуют.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Сборка и деплой на VPS
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      - name: Сборка behavior pack
+        run: npm run build
+
+      - name: Функциональные тесты движка
+        run: node --import ./tests/register.mjs tests/engine.test.mjs
+
+      - name: Проверка артефактов сборки
+        run: test -f addon/scripts/index.js
+
+      - name: Настройка SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Доверяем ключу хоста при первом подключении; далее он фиксируется.
+          ssh-keyscan -p "${DEPLOY_PORT:-22}" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Доставка скриптов и манифеста
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          # --delete только внутри scripts/: удалённые модули не должны
+          # оставаться на сервере и подгружаться старым кодом.
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/id_deploy -p ${DEPLOY_PORT:-22}" \
+            addon/scripts/ \
+            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/addon/scripts/"
+
+          # Манифест кладём строго в addon/ — рядом со scripts/, как ждёт BDS.
+          rsync -az \
+            -e "ssh -i ~/.ssh/id_deploy -p ${DEPLOY_PORT:-22}" \
+            addon/manifest.json \
+            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/addon/manifest.json"
+
+          # docker-compose.yml — в корень каталога развёртывания.
+          rsync -az \
+            -e "ssh -i ~/.ssh/id_deploy -p ${DEPLOY_PORT:-22}" \
+            docker-compose.yml \
+            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker-compose.yml"
+
+      - name: Перезапуск сервера
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd '$DEPLOY_PATH' && docker compose up -d && docker restart bds"
+
+      - name: Проверка, что сервер отвечает
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          # BDS поднимается небыстро: даём ему время до опроса статуса.
+          sleep 45
+          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker exec bds mc-monitor status-bedrock --host 127.0.0.1 --port 19132"
+
+      - name: Хвост лога сервера
+        if: always()
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker logs --tail 50 bds" || true

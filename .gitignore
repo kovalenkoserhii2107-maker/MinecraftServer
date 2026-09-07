@@ -1,0 +1,21 @@
+# Зависимости
+node_modules/
+
+# Скомпилированные скрипты: артефакт сборки, собирается из addon/src.
+addon/scripts/*
+!addon/scripts/.gitkeep
+
+# Данные сервера: миры, логи, конфиги контейнера.
+server-data/
+
+# Локальная конфигурация
+.env
+
+# Бинарник Phantom (скачивается локально, см. README)
+phantom
+phantom-macos*
+phantom-linux*
+
+# Системный мусор
+.DS_Store
+*.log
