@@ -18,7 +18,7 @@ services:
 
     ports:
       # Minecraft Bedrock работает поверх UDP (RakNet), не TCP.
-      - "${SERVER_PORT:-19132}:19132/udp"
+      - "${SERVER_PORT:-19133}:19133/udp"
       - "${SERVER_PORT_V6:-19133}:19133/udp"
 
     environment:
@@ -56,7 +56,7 @@ services:
     mem_limit: "${MEM_LIMIT:-1500m}"
 
     healthcheck:
-      test: ["CMD", "mc-monitor", "status-bedrock", "--host", "127.0.0.1", "--port", "19132"]
+      test: [ "CMD", "mc-monitor", "status-bedrock", "--host", "127.0.0.1", "--port", "19132" ]
       interval: 30s
       timeout: 10s
       retries: 3
