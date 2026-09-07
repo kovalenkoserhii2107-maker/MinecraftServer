@@ -8,8 +8,8 @@
  * выключении механики и при остановке сервера.
  */
 import assert from 'node:assert/strict';
-import { system, world, Player, CustomCommandRegistry, CustomCommandStatus, CommandPermissionLevel, __addPlayer } from '@minecraft/server';
-import { __shown } from '@minecraft/server-ui';
+import { system, world, Player, CustomCommandRegistry, CustomCommandStatus, CommandPermissionLevel, ItemLockMode, __addPlayer } from '@minecraft/server';
+import { __shown, __queueResponses, __reset } from '@minecraft/server-ui';
 
 await import('../addon/scripts/index.js');
 
@@ -22,11 +22,11 @@ system.beforeEvents.startup.emit({ customCommandRegistry: registry });
 
 check('команды зарегистрированы', () => {
   const names = [...registry.commands.keys()].sort();
-  assert.deepEqual(names, ['mc:back','mc:deathpoint','mc:help','mc:kit','mc:mechanics','mc:panel','mc:stats','mc:toggle']);
+  assert.deepEqual(names, ['mc:back','mc:device','mc:deathpoint','mc:help','mc:kit','mc:mechanics','mc:panel','mc:stats','mc:toggle'].sort());
 });
 check('enum механик зарегистрирован до использования', () => {
   assert.deepEqual(registry.enums.get('mc:mechanic_id'),
-    ['welcome','death_beacon','playtime_rewards','combat_feedback','admin_panel']);
+    ['device','welcome','death_beacon','playtime_rewards','combat_feedback','admin_panel']);
 });
 
 // --- 2. Команда до загрузки мира отвечает отказом, а не падает ---
@@ -38,10 +38,10 @@ check('команда до worldLoad -> Failure', () => {
 
 // --- 3. Загрузка мира: активация механик ---
 world.afterEvents.worldLoad.emit({});
-check('все 5 механик активны', () => {
+check('все 6 механик активны', () => {
   const r = registry.invoke('mc:mechanics', { sourceEntity: alice });
   assert.equal(r.status, CustomCommandStatus.Success);
-  assert.equal((r.message.match(/вкл/g) ?? []).length, 5);
+  assert.equal((r.message.match(/вкл/g) ?? []).length, 6);
 });
 
 // --- 4. welcome: первый вход выдаёт набор и объявление ---
@@ -50,16 +50,17 @@ system.advance(60);
 check('первый вход: объявление в чат', () => {
   assert.ok(world.broadcast.some((m) => m.includes('Alice') && m.includes('впервые')));
 });
+const kitItems = (p) => p.container.items.filter((i) => i.getDynamicProperty('mc:device') !== true);
 check('первый вход: выдан стартовый набор из 4 предметов', () => {
-  assert.equal(alice.container.items.length, 4);
-  assert.equal(alice.container.items[0].typeId, 'minecraft:bread');
+  assert.equal(kitItems(alice).length, 4);
+  assert.equal(kitItems(alice)[0].typeId, 'minecraft:bread');
 });
 check('первый вход: показан заголовок', () => assert.equal(alice.titles.length, 1));
 
 // повторный вход не выдаёт набор второй раз
 world.afterEvents.playerSpawn.emit({ player: alice, initialSpawn: true });
 system.advance(60);
-check('повторный вход: набор не дублируется', () => assert.equal(alice.container.items.length, 4));
+check('повторный вход: набор не дублируется', () => assert.equal(kitItems(alice).length, 4));
 check('/mc:kit после автовыдачи -> Failure', () => {
   assert.equal(registry.invoke('mc:kit', { sourceEntity: alice }).status, CustomCommandStatus.Failure);
 });
@@ -120,6 +121,83 @@ await new Promise((r) => setImmediate(r));
 check('панель показана оператору с разделом механик', () => {
   assert.equal(__shown.length, 1);
   assert.ok(__shown[0].buttons.some((b) => b.includes('Механики')));
+});
+
+
+// --- 8a. device: коммуникатор у каждого игрока ---
+const deviceOf = (p) => p.container.items.find((i) => i.getDynamicProperty('mc:device') === true);
+
+check('коммуникатор выдан при входе', () => {
+  const d = deviceOf(alice);
+  assert.ok(d, 'коммуникатор не найден в инвентаре');
+  assert.equal(d.typeId, 'minecraft:clock');
+  assert.ok(d.nameTag.includes('Коммуникатор'));
+});
+check('коммуникатор не теряется при смерти и не выбрасывается', () => {
+  const d = deviceOf(alice);
+  assert.equal(d.keepOnDeath, true);
+  assert.equal(d.lockMode, ItemLockMode.inventory);
+});
+check('повторный вход не плодит вторую копию', () => {
+  world.afterEvents.playerSpawn.emit({ player: alice, initialSpawn: true });
+  system.advance(60);
+  const devices = alice.container.items.filter((i) => i.getDynamicProperty('mc:device') === true);
+  assert.equal(devices.length, 1);
+});
+check('/mc:device при наличии предмета не выдаёт второй', () => {
+  registry.invoke('mc:device', { sourceEntity: alice });
+  system.advance(2);
+  const devices = alice.container.items.filter((i) => i.getDynamicProperty('mc:device') === true);
+  assert.equal(devices.length, 1);
+  assert.ok(alice.messages.at(-1).includes('уже у вас'));
+});
+
+// Использование предмета открывает ту же панель, что и команда.
+__reset();
+check('использование коммуникатора открывает панель', () => {
+  world.afterEvents.itemUse.emit({ itemStack: deviceOf(alice), source: alice });
+  system.advance(2);
+});
+await new Promise((r) => setImmediate(r));
+check('панель открыта именно коммуникатором', () => {
+  assert.equal(__shown.length, 1);
+  assert.equal(__shown[0].title, 'Панель сервера');
+});
+
+__reset();
+check('посторонний предмет панель не открывает', () => {
+  // Именно предмет из набора: коммуникатор выдаётся первым и лежит в слоте 0.
+  world.afterEvents.itemUse.emit({ itemStack: kitItems(alice)[0], source: alice });
+  system.advance(2);
+});
+await new Promise((r) => setImmediate(r));
+check('обычный предмет проигнорирован', () => assert.equal(__shown.length, 0));
+
+// Навигация по меню: главное меню -> «Механики» -> переключение первой механики.
+__reset();
+__queueResponses([1, 0]);
+check('через панель переключается механика', () => {
+  world.afterEvents.itemUse.emit({ itemStack: deviceOf(alice), source: alice });
+  system.advance(2);
+});
+await new Promise((r) => setImmediate(r));
+system.advance(2);
+await new Promise((r) => setImmediate(r));
+check('открылось меню механик и состояние изменилось', () => {
+  assert.ok(__shown.length >= 2, `показано форм: ${__shown.length}`);
+  assert.equal(__shown[1].title, 'Механики сервера');
+  assert.equal(world.getDynamicProperty('mc:mechanic.device.enabled'), false);
+});
+// Возвращаем механику, чтобы не влиять на дальнейшие проверки.
+registry.invoke('mc:toggle', { sourceEntity: alice }, 'device', true);
+system.advance(2);
+
+check('игрок без места в инвентаре получает подсказку', () => {
+  const full = __addPlayer(new Player('Full', { inventorySize: 1 }));
+  full.container.addItem({ typeId: 'minecraft:stone', getDynamicProperty: () => undefined });
+  world.afterEvents.playerSpawn.emit({ player: full, initialSpawn: true });
+  system.advance(60);
+  assert.ok(full.messages.some((m) => m.includes('/mc:device')));
 });
 
 // --- 9. Отключение механики снимает подписки и таймеры ---

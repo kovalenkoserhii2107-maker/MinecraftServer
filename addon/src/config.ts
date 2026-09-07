@@ -18,6 +18,7 @@ export interface EngineConfig {
     readonly deathBeacon: DeathBeaconConfig;
     readonly playtime: PlaytimeConfig;
     readonly combat: CombatConfig;
+    readonly device: DeviceConfig;
 }
 
 export interface WelcomeConfig {
@@ -56,6 +57,26 @@ export interface CombatConfig {
     readonly lowHealthCooldownTicks: number;
 }
 
+export interface DeviceConfig {
+    /**
+     * Предмет, играющий роль коммуникатора.
+     *
+     * Здесь ванильный предмет, а не собственный: кастомному предмету нужен
+     * resource pack с текстурой и названием, иначе в руках у игрока будет
+     * «отсутствующая текстура». Когда resource pack появится, достаточно
+     * поменять идентификатор здесь.
+     */
+    readonly itemType: string;
+    /** Название в руках. Оно же отличает коммуникатор от обычного предмета. */
+    readonly itemName: string;
+    /** Подсказка под названием. */
+    readonly lore: readonly string[];
+    /** Выдавать при входе, если у игрока его нет. */
+    readonly giveOnJoin: boolean;
+    /** Запретить выбрасывать и убирать в сундуки. */
+    readonly lockInInventory: boolean;
+}
+
 export const DEFAULT_CONFIG: EngineConfig = {
     logLevel: LogLevel.Info,
     broadcastErrorsToAdmins: true,
@@ -83,6 +104,13 @@ export const DEFAULT_CONFIG: EngineConfig = {
         showTargetHealth: true,
         lowHealthRatio: 0.3,
         lowHealthCooldownTicks: 100,
+    },
+    device: {
+        itemType: 'minecraft:clock',
+        itemName: '§b§lКоммуникатор',
+        lore: ['§7Используйте предмет,', '§7чтобы открыть панель сервера'],
+        giveOnJoin: true,
+        lockInInventory: true,
     },
 };
 

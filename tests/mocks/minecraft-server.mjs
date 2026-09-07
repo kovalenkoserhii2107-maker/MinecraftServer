@@ -11,8 +11,35 @@ export const CustomCommandParamType = { Enum:'Enum', Boolean:'Boolean', String:'
 export const CustomCommandStatus = { Success:0, Failure:1 };
 export const GameMode = { Survival:'Survival', Creative:'Creative', Adventure:'Adventure', Spectator:'Spectator' };
 export const EntityComponentTypes = { Health:'minecraft:health', Inventory:'minecraft:inventory' };
+export const ItemLockMode = { none:'none', inventory:'inventory', slot:'slot' };
 
-export class ItemStack { constructor(typeId, amount){ this.typeId = typeId; this.amount = amount; } }
+export class ItemStack {
+  constructor(typeId, amount = 1){
+    this.typeId = typeId; this.amount = amount;
+    this.nameTag = undefined; this.keepOnDeath = false; this.lockMode = ItemLockMode.none;
+    this.lore = []; this.props = new Map();
+  }
+  setLore(list){ this.lore = [...list]; }
+  getLore(){ return [...this.lore]; }
+  getDynamicProperty(k){ return this.props.get(k); }
+  setDynamicProperty(k, v){ if (v === undefined) this.props.delete(k); else this.props.set(k, v); }
+}
+
+/** Инвентарь фиксированного размера — как настоящий Container. */
+class ContainerMock {
+  constructor(size = 36){ this.size = size; this.slots = new Array(size).fill(undefined); }
+  get emptySlotsCount(){ return this.slots.filter((s) => s === undefined).length; }
+  getItem(slot){ return this.slots[slot]; }
+  setItem(slot, item){ this.slots[slot] = item; }
+  addItem(stack){
+    const free = this.slots.indexOf(undefined);
+    if (free === -1) throw new Error('container full');
+    this.slots[free] = stack;
+    return undefined;
+  }
+  get items(){ return this.slots.filter(Boolean); }
+}
+export { ContainerMock };
 
 class Props {
   constructor(){ this.p = new Map(); }
@@ -29,8 +56,7 @@ export class Player extends Entity {
     this.dimension = { id: 'minecraft:overworld' };
     this.messages = []; this.actionBars = []; this.titles = []; this.sounds = [];
     this.xp = 0; this.teleports = [];
-    this.container = { items: [], emptySlotsCount: 36,
-      addItem(stack){ this.items.push(stack); this.emptySlotsCount--; } };
+    this.container = new ContainerMock(opts.inventorySize ?? 36);
     this.health = { currentValue: 20, effectiveMax: 20 };
     this.onScreenDisplay = {
       setActionBar: (t) => this.actionBars.push(t),
@@ -60,7 +86,7 @@ class WorldMock extends Props {
     this.afterEvents = {
       worldLoad: new Signal('worldLoad'), playerSpawn: new Signal('playerSpawn'),
       playerLeave: new Signal('playerLeave'), entityDie: new Signal('entityDie'),
-      entityHurt: new Signal('entityHurt'),
+      entityHurt: new Signal('entityHurt'), itemUse: new Signal('itemUse'),
     };
     this.beforeEvents = {};
   }
