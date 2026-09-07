@@ -1,6 +1,9 @@
 import { CommandPermissionLevel, Player, system } from '@minecraft/server';
 import { ActionFormData, FormCancelationReason } from '@minecraft/server-ui';
 import { Color, formatCoords, formatDimension, formatMinutes } from '../core/format.js';
+import { formatMoney, getBalance } from '../core/economy.js';
+import { chunkAt, chunkBounds, getOwner, listOwnedChunks } from '../core/plots.js';
+import { renderPlotMap } from '../mechanics/plots.js';
 import type { Logger } from '../core/logger.js';
 import type { EngineRuntime } from '../core/runtime.js';
 import { readNumber, readString, readVector } from '../core/storage.js';
@@ -44,6 +47,7 @@ function playerSummary(player: Player): string {
 
     const lines = [
         `${Color.gray}Игрок: ${Color.yellow}${player.name}${Color.reset}`,
+        `${Color.gray}Баланс: ${Color.gold}${formatMoney(getBalance(player))}${Color.reset}`,
         `${Color.gray}В игре: ${Color.yellow}${formatMinutes(minutes)}${Color.reset}`,
         `${Color.gray}Входов: ${Color.yellow}${joins}${Color.gray}, смертей: ${Color.yellow}${deaths}${Color.reset}`,
     ];
@@ -87,13 +91,64 @@ async function showMechanicsMenu(player: Player, runtime: EngineRuntime): Promis
     await showMechanicsMenu(player, runtime);
 }
 
+
+/** Карта вокруг игрока и список его владений. */
+async function showPlotsMenu(player: Player, runtime: EngineRuntime): Promise<void> {
+    const config = runtime.config.plots;
+    const symbol = runtime.config.economy.currencySymbol;
+    const here = chunkAt(player.dimension.id, player.location.x, player.location.z);
+    const owner = getOwner(here);
+    const owned = listOwnedChunks(player.id);
+    const bounds = chunkBounds(here);
+
+    const body = [
+        renderPlotMap(player, config.mapRadius),
+        '',
+        `${Color.green}█${Color.gray} ваше   ${Color.red}█${Color.gray} чужое   ${Color.darkGray}░${Color.gray} свободно   ${Color.yellow}▣${Color.gray} вы здесь${Color.reset}`,
+        '',
+        owner
+            ? `${Color.gray}Здесь: ${owner.id === player.id ? `${Color.green}ваш участок` : `${Color.red}${owner.name}`}${Color.reset}`
+            : `${Color.gray}Здесь: ${Color.yellow}земля свободна${Color.reset}`,
+        `${Color.gray}Границы чанка: ${bounds.minX}..${bounds.maxX} X, ${bounds.minZ}..${bounds.maxZ} Z${Color.reset}`,
+        `${Color.gray}Ваших чанков: ${Color.yellow}${owned.length}${Color.reset}`,
+    ].join('\n');
+
+    const form = new ActionFormData()
+        .title('Участки')
+        .body(body)
+        .button(`${Color.yellow}Купить 16×16${Color.gray}\n${formatMoney(config.cost16, symbol)}${Color.reset}`)
+        .button(`${Color.yellow}Купить 32×32${Color.gray}\n${formatMoney(config.cost32, symbol)}${Color.reset}`)
+        .button(`${Color.aqua}Обновить карту${Color.reset}`)
+        .button(`${Color.gray}Назад${Color.reset}`);
+
+    const response = await showWhenReady(form, player, runtime.log);
+    if (!response || response.canceled || response.selection === undefined) return;
+
+    switch (response.selection) {
+        case 0:
+        case 1:
+            // Покупка меняет мир, поэтому идёт отдельным тиком, а результат
+            // приходит сообщением в чат — форму заново не открываем.
+            player.sendMessage(
+                `${Color.gray}Наберите ${Color.yellow}/mc:claim ${response.selection === 0 ? '16x16' : '32x32'}${Color.gray}, чтобы подтвердить покупку.${Color.reset}`,
+            );
+            return;
+        case 2:
+            await showPlotsMenu(player, runtime);
+            return;
+        default:
+            await showMainMenu(player, runtime);
+    }
+}
+
 async function showMainMenu(player: Player, runtime: EngineRuntime): Promise<void> {
     const isAdmin = player.commandPermissionLevel >= CommandPermissionLevel.Admin;
 
     const form = new ActionFormData()
         .title('Панель сервера')
         .body(playerSummary(player))
-        .button(`${Color.yellow}Список команд${Color.reset}`);
+        .button(`${Color.yellow}Список команд${Color.reset}`)
+        .button(`${Color.green}Участки и карта${Color.reset}`);
 
     if (isAdmin) {
         form.button(`${Color.aqua}Механики${Color.reset}`);
@@ -108,6 +163,10 @@ async function showMainMenu(player: Player, runtime: EngineRuntime): Promise<voi
             `${Color.aqua}Команды:${Color.reset}\n` +
                 `${Color.yellow}/mc:panel${Color.gray} — эта панель\n` +
                 `${Color.yellow}/mc:device${Color.gray} — получить коммуникатор\n` +
+                `${Color.yellow}/mc:balance${Color.gray} — баланс криптогривны\n` +
+                `${Color.yellow}/mc:claim${Color.gray} — купить участок 16x16 или 32x32\n` +
+                `${Color.yellow}/mc:plotinfo${Color.gray} — чей участок под вами\n` +
+                `${Color.yellow}/mc:unclaim${Color.gray} — продать участок\n` +
                 `${Color.yellow}/mc:stats${Color.gray} — ваша статистика\n` +
                 `${Color.yellow}/mc:kit${Color.gray} — стартовый набор\n` +
                 `${Color.yellow}/mc:deathpoint${Color.gray} — координаты смерти\n` +
@@ -115,7 +174,11 @@ async function showMainMenu(player: Player, runtime: EngineRuntime): Promise<voi
         );
         return;
     }
-    if (isAdmin && response.selection === 1) {
+    if (response.selection === 1) {
+        await showPlotsMenu(player, runtime);
+        return;
+    }
+    if (isAdmin && response.selection === 2) {
         await showMechanicsMenu(player, runtime);
     }
 }

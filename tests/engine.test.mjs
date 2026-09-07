@@ -8,7 +8,7 @@
  * выключении механики и при остановке сервера.
  */
 import assert from 'node:assert/strict';
-import { system, world, Player, CustomCommandRegistry, CustomCommandStatus, CommandPermissionLevel, ItemLockMode, __addPlayer } from '@minecraft/server';
+import { system, world, Player, Block, CustomCommandRegistry, CustomCommandStatus, CommandPermissionLevel, ItemLockMode, DisplaySlotId, __addPlayer } from '@minecraft/server';
 import { __shown, __queueResponses, __reset } from '@minecraft/server-ui';
 
 await import('../addon/scripts/index.js');
@@ -22,11 +22,13 @@ system.beforeEvents.startup.emit({ customCommandRegistry: registry });
 
 check('команды зарегистрированы', () => {
   const names = [...registry.commands.keys()].sort();
-  assert.deepEqual(names, ['mc:back','mc:device','mc:deathpoint','mc:help','mc:kit','mc:mechanics','mc:panel','mc:stats','mc:toggle'].sort());
+  assert.deepEqual(names, ['mc:back','mc:balance','mc:claim','mc:deathpoint','mc:device','mc:help','mc:kit',
+    'mc:mechanics','mc:panel','mc:plotinfo','mc:stats','mc:toggle','mc:unclaim'].sort());
 });
 check('enum механик зарегистрирован до использования', () => {
   assert.deepEqual(registry.enums.get('mc:mechanic_id'),
-    ['device','welcome','death_beacon','playtime_rewards','combat_feedback','admin_panel']);
+    ['device','economy','plots','welcome','death_beacon','playtime_rewards','combat_feedback','admin_panel']);
+  assert.deepEqual(registry.enums.get('mc:plot_size'), ['16x16','32x32']);
 });
 
 // --- 2. Команда до загрузки мира отвечает отказом, а не падает ---
@@ -38,10 +40,10 @@ check('команда до worldLoad -> Failure', () => {
 
 // --- 3. Загрузка мира: активация механик ---
 world.afterEvents.worldLoad.emit({});
-check('все 6 механик активны', () => {
+check('все 8 механик активны', () => {
   const r = registry.invoke('mc:mechanics', { sourceEntity: alice });
   assert.equal(r.status, CustomCommandStatus.Success);
-  assert.equal((r.message.match(/вкл/g) ?? []).length, 6);
+  assert.equal((r.message.match(/вкл/g) ?? []).length, 8);
 });
 
 // --- 4. welcome: первый вход выдаёт набор и объявление ---
@@ -175,7 +177,7 @@ check('обычный предмет проигнорирован', () => assert
 
 // Навигация по меню: главное меню -> «Механики» -> переключение первой механики.
 __reset();
-__queueResponses([1, 0]);
+__queueResponses([2, 0]);  // 0 команды, 1 участки, 2 механики
 check('через панель переключается механика', () => {
   world.afterEvents.itemUse.emit({ itemStack: deviceOf(alice), source: alice });
   system.advance(2);
@@ -198,6 +200,149 @@ check('игрок без места в инвентаре получает по�
   world.afterEvents.playerSpawn.emit({ player: full, initialSpawn: true });
   system.advance(60);
   assert.ok(full.messages.some((m) => m.includes('/mc:device')));
+});
+
+
+// --- 8b. Криптогривна ---
+check('стартовый капитал начислен при первом входе', () => {
+  assert.equal(alice.getDynamicProperty('mc:balance'), 100000);
+  assert.ok(alice.messages.some((m) => m.includes('стартовый капитал')));
+});
+check('баланс виден на боковой панели', () => {
+  const objective = world.scoreboard.slots.get(DisplaySlotId.Sidebar);
+  assert.ok(objective, 'табло не занимает боковой слот');
+  assert.equal(objective.getScore(alice), 100000);
+});
+check('/mc:balance показывает сумму с разделителями', () => {
+  const r = registry.invoke('mc:balance', { sourceEntity: alice });
+  assert.equal(r.status, CustomCommandStatus.Success);
+  // Разряды разделяются неразрывным пробелом, чтобы число не переносилось в UI.
+  assert.ok(r.message.includes('100\u00A0000'), JSON.stringify(r.message));
+});
+
+// --- 8c. Участки: покупка и защита ---
+const blockAt = (p, x, z) => new Block(x, 64, z, p.dimension);
+
+alice.location = { x: 8, y: 64, z: 8 };   // чанк 0,0
+bob.location = { x: 8, y: 64, z: 8 };
+
+check('/mc:claim покупает участок 16x16 и списывает цену', () => {
+  const r = registry.invoke('mc:claim', { sourceEntity: alice }, '16x16');
+  assert.equal(r.status, CustomCommandStatus.Success, r.message);
+  assert.equal(alice.getDynamicProperty('mc:balance'), 100000 - 5000);
+  assert.equal(world.getDynamicProperty('mc:plot.o.0.0'), `${alice.id}|Alice`);
+});
+check('повторная покупка своего же участка отклоняется', () => {
+  const r = registry.invoke('mc:claim', { sourceEntity: alice }, '16x16');
+  assert.equal(r.status, CustomCommandStatus.Failure);
+  assert.ok(r.message.includes('уже ваш'));
+});
+check('чужой участок купить нельзя', () => {
+  const r = registry.invoke('mc:claim', { sourceEntity: bob }, '16x16');
+  assert.equal(r.status, CustomCommandStatus.Failure);
+  assert.ok(r.message.includes('Alice'), r.message);
+});
+
+check('владелец ломает блок на своём участке', () => {
+  const event = { block: blockAt(alice, 5, 5), player: alice, cancel: false };
+  world.beforeEvents.playerBreakBlock.emit(event);
+  assert.equal(event.cancel, false);
+});
+check('чужой не может ломать блок на участке', () => {
+  const event = { block: blockAt(bob, 5, 5), player: bob, cancel: false };
+  world.beforeEvents.playerBreakBlock.emit(event);
+  assert.equal(event.cancel, true);
+  system.advance(2);
+  assert.ok(bob.messages.some((m) => m.includes('частная собственность')));
+});
+check('чужой не может взаимодействовать с блоком', () => {
+  const event = { block: blockAt(bob, 5, 5), player: bob, cancel: false, isFirstEvent: true };
+  world.beforeEvents.playerInteractWithBlock.emit(event);
+  assert.equal(event.cancel, true);
+});
+check('за пределами участка ограничений нет', () => {
+  const event = { block: blockAt(bob, 100, 100), player: bob, cancel: false };
+  world.beforeEvents.playerBreakBlock.emit(event);
+  assert.equal(event.cancel, false);
+});
+check('блок, поставленный чужим на участке, снимается', () => {
+  const block = blockAt(bob, 7, 7);
+  world.afterEvents.playerPlaceBlock.emit({ block, player: bob });
+  system.advance(2);
+  assert.equal(block.typeId, 'minecraft:air');
+});
+check('блок владельца на своём участке остаётся', () => {
+  const block = blockAt(alice, 7, 7);
+  world.afterEvents.playerPlaceBlock.emit({ block, player: alice });
+  system.advance(2);
+  assert.equal(block.typeId, 'minecraft:stone');
+});
+
+// --- 8d. Участок 32x32 занимает выровненный квадрат 2x2 чанка ---
+const carl = __addPlayer(new Player('Carl'));
+world.afterEvents.playerSpawn.emit({ player: carl, initialSpawn: true });
+system.advance(60);
+carl.location = { x: 8 * 16 + 5, y: 64, z: 9 * 16 + 5 };  // чанк 8,9
+
+check('/mc:claim 32x32 занимает четыре чанка по чётной сетке', () => {
+  const r = registry.invoke('mc:claim', { sourceEntity: carl }, '32x32');
+  assert.equal(r.status, CustomCommandStatus.Success, r.message);
+  for (const key of ['mc:plot.o.8.8','mc:plot.o.8.9','mc:plot.o.9.8','mc:plot.o.9.9']) {
+    assert.ok(world.getDynamicProperty(key), `не занят чанк ${key}`);
+  }
+  assert.equal(carl.getDynamicProperty('mc:balance'), 100000 - 18000);
+});
+check('не хватает средств — покупка отклоняется', () => {
+  carl.setDynamicProperty('mc:balance', 10);
+  carl.location = { x: 500, y: 64, z: 500 };
+  const r = registry.invoke('mc:claim', { sourceEntity: carl }, '16x16');
+  assert.equal(r.status, CustomCommandStatus.Failure);
+  assert.ok(r.message.includes('Не хватает'), r.message);
+});
+
+// --- 8e. Налоги и продажа ---
+check('налоги начисляются по числу чанков', () => {
+  carl.setDynamicProperty('mc:balance', 0);
+  system.advance(12000);
+  assert.equal(carl.getDynamicProperty('mc:balance'), 4 * 25);
+  assert.ok(carl.messages.some((m) => m.includes('Налоги')));
+});
+check('/mc:unclaim возвращает часть средств и снимает владение', () => {
+  alice.location = { x: 8, y: 64, z: 8 };
+  const before = alice.getDynamicProperty('mc:balance');
+  const r = registry.invoke('mc:unclaim', { sourceEntity: alice });
+  assert.equal(r.status, CustomCommandStatus.Success);
+  system.advance(2);
+  assert.equal(world.getDynamicProperty('mc:plot.o.0.0'), undefined);
+  assert.equal(alice.getDynamicProperty('mc:balance'), before + 2500);
+});
+check('после продажи чужой снова может строить', () => {
+  const event = { block: blockAt(bob, 5, 5), player: bob, cancel: false };
+  world.beforeEvents.playerBreakBlock.emit(event);
+  assert.equal(event.cancel, false);
+});
+check('/mc:plotinfo сообщает владельца', () => {
+  carl.location = { x: 8 * 16 + 5, y: 64, z: 9 * 16 + 5 };
+  const r = registry.invoke('mc:plotinfo', { sourceEntity: carl });
+  assert.ok(r.message.includes('Carl'), r.message);
+});
+
+// --- 8f. Карта участков ---
+__reset();
+__queueResponses([1]);
+check('в панели открывается карта участков', () => {
+  world.afterEvents.itemUse.emit({ itemStack: deviceOf(carl), source: carl });
+  system.advance(2);
+});
+await new Promise((r) => setImmediate(r));
+system.advance(2);
+await new Promise((r) => setImmediate(r));
+check('карта показывает свой участок и легенду', () => {
+  const map = __shown.find((f) => f.title === 'Участки');
+  assert.ok(map, 'меню участков не открылось');
+  assert.ok(map.body.includes('▣'), 'нет отметки положения игрока');
+  assert.ok(map.body.includes('свободно'), 'нет легенды');
+  assert.ok(map.body.includes('Ваших чанков: '), 'нет счётчика владений');
 });
 
 // --- 9. Отключение механики снимает подписки и таймеры ---

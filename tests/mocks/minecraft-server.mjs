@@ -12,6 +12,8 @@ export const CustomCommandStatus = { Success:0, Failure:1 };
 export const GameMode = { Survival:'Survival', Creative:'Creative', Adventure:'Adventure', Spectator:'Spectator' };
 export const EntityComponentTypes = { Health:'minecraft:health', Inventory:'minecraft:inventory' };
 export const ItemLockMode = { none:'none', inventory:'inventory', slot:'slot' };
+export const DisplaySlotId = { BelowName:'BelowName', List:'List', Sidebar:'Sidebar' };
+export const ObjectiveSortOrder = { Ascending:'Ascending', Descending:'Descending' };
 
 export class ItemStack {
   constructor(typeId, amount = 1){
@@ -45,6 +47,16 @@ class Props {
   constructor(){ this.p = new Map(); }
   getDynamicProperty(k){ return this.p.get(k); }
   setDynamicProperty(k, v){ if (v === undefined) this.p.delete(k); else this.p.set(k, v); }
+  getDynamicPropertyIds(){ return [...this.p.keys()]; }
+}
+
+/** Блок мира — ровно то, что читают механики защиты. */
+export class Block {
+  constructor(x, y, z, dimension, typeId = 'minecraft:stone'){
+    this.x = x; this.y = y; this.z = z; this.dimension = dimension; this.typeId = typeId;
+  }
+  get location(){ return { x: this.x, y: this.y, z: this.z }; }
+  setType(typeId){ this.typeId = typeId; }
 }
 export class Entity extends Props {}
 export class Player extends Entity {
@@ -79,6 +91,20 @@ const players = [];
 export function __addPlayer(p){ players.push(p); return p; }
 export function __players(){ return players; }
 
+/** Табло: достаточно объектива, счетов и занятого слота отображения. */
+class ObjectiveMock {
+  constructor(id, displayName){ this.id = id; this.displayName = displayName; this.scores = new Map(); }
+  setScore(participant, score){ this.scores.set(participant.name ?? participant, score); }
+  getScore(participant){ return this.scores.get(participant.name ?? participant); }
+}
+class ScoreboardMock {
+  constructor(){ this.objectives = new Map(); this.slots = new Map(); }
+  addObjective(id, displayName){ const o = new ObjectiveMock(id, displayName); this.objectives.set(id, o); return o; }
+  getObjective(id){ return this.objectives.get(id); }
+  setObjectiveAtDisplaySlot(slot, options){ this.slots.set(slot, options.objective); }
+  clearObjectiveAtDisplaySlot(slot){ const o = this.slots.get(slot); this.slots.delete(slot); return o; }
+}
+
 class WorldMock extends Props {
   constructor(){
     super();
@@ -87,8 +113,13 @@ class WorldMock extends Props {
       worldLoad: new Signal('worldLoad'), playerSpawn: new Signal('playerSpawn'),
       playerLeave: new Signal('playerLeave'), entityDie: new Signal('entityDie'),
       entityHurt: new Signal('entityHurt'), itemUse: new Signal('itemUse'),
+      playerPlaceBlock: new Signal('playerPlaceBlock'),
     };
-    this.beforeEvents = {};
+    this.beforeEvents = {
+      playerBreakBlock: new Signal('playerBreakBlock'),
+      playerInteractWithBlock: new Signal('playerInteractWithBlock'),
+    };
+    this.scoreboard = new ScoreboardMock();
   }
   getAllPlayers(){ return players.filter((p) => p.isValid); }
   sendMessage(m){ this.broadcast.push(m); }
