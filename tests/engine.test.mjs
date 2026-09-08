@@ -92,6 +92,14 @@ const openPanel = async (p, responses = [], modal = []) => {
     await pump(10);
 };
 
+
+const useBlueprint = async (p, responses = []) => {
+    __reset();
+    __queueResponses(responses);
+    world.afterEvents.itemUse.emit({ itemStack: bpItemOf(p), source: p });
+    await pump(10);
+};
+
 await openPanel(alice);
 check('коммуникатор открывает главное меню', () => {
     assert.equal(__shown.length, 1);
@@ -256,7 +264,8 @@ check('чужой участок закрыт для постройки', () => 
 // --- 7. Покупка здания через каталог ---
 alice.setDynamicProperty('mc:balance', 100000);
 lookAt(alice, 4, 64, 4);
-await openPanel(alice, [1, 0, 0, 0]);               // Строительство -> Каталог -> Домик -> Построить
+await openPanel(alice, [1, 0, 0]);                  // Строительство -> Каталог -> Домик
+await useBlueprint(alice, [0]);                     // Построить
 check('здание установлено в точке под курсором', () => {
     const placed = world.structureManager.placements.at(-1);
     assert.ok(placed, 'структура не установлена');
@@ -272,7 +281,8 @@ const placementsBefore = () => world.structureManager.placements.length;
 let countBefore = placementsBefore();
 let balanceBefore = alice.getDynamicProperty('mc:balance');
 lookAt(alice, 4, 64, 4);
-await openPanel(alice, [1, 0, 0, 1]);               // ... -> Отмена
+await openPanel(alice, [1, 0, 0]);                  // ... -> Домик
+await useBlueprint(alice, [1]);                     // Отмена
 check('отмена в подтверждении ничего не строит', () => {
     assert.equal(placementsBefore(), countBefore, 'структура построена вопреки отмене');
     assert.equal(alice.getDynamicProperty('mc:balance'), balanceBefore, 'деньги списаны при отмене');
@@ -281,7 +291,8 @@ check('отмена в подтверждении ничего не строит
 countBefore = placementsBefore();
 balanceBefore = alice.getDynamicProperty('mc:balance');
 lookAt(alice, 300 * 16 + 4, 64, 4);                 // чужой участок Bob
-await openPanel(alice, [1, 0, 0, 0]);               // ... -> Построить
+await openPanel(alice, [1, 0, 0]);                  // ... -> Домик
+await useBlueprint(alice, [0]);                     // Построить
 check('на чужом участке подтверждение не строит', () => {
     assert.equal(placementsBefore(), countBefore, 'структура построена на чужом участке');
     assert.equal(alice.getDynamicProperty('mc:balance'), balanceBefore, 'деньги списаны без постройки');
@@ -293,7 +304,8 @@ check('подтверждение честно сообщает о запрет�
 });
 
 lookAt(alice, 4, 64, 4);
-await openPanel(alice, [1, 0, 0, 0]);
+await openPanel(alice, [1, 0, 0]);
+await useBlueprint(alice, [0]);
 check('подтверждение показывает габарит и вердикт по участку', () => {
     const confirm = __shown.find((f) => f.title === 'Подтверждение');
     assert.ok(confirm, 'подтверждение не открылось');

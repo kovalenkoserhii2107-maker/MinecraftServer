@@ -12,7 +12,7 @@ import { info, success } from '../core/format.js';
 import { heldItem, isMarked, type MarkedItemSpec } from '../core/markedItem.js';
 import { defineMechanic, type MechanicContext } from '../core/mechanic.js';
 import { getRuntime } from '../core/runtime.js';
-import { showCatalog } from '../ui/panel.js';
+import { showCatalog, showConfirmPlacement } from '../ui/panel.js';
 
 /** Метка чертежа: как и у коммуникатора, живёт в свойстве самого ItemStack. */
 export const KEY_BLUEPRINT = 'mc:blueprint';
@@ -68,9 +68,16 @@ export const blueprintsMechanic = defineMechanic({
                 return;
             }
 
-            void showCatalog(player, runtime).catch((error: unknown) =>
-                ctx.log.error('Ошибка каталога зданий:', error),
-            );
+            const selected = selectedBlueprint(player);
+            if (selected) {
+                void showConfirmPlacement(player, selected, runtime).catch((error: unknown) =>
+                    ctx.log.error('Ошибка окна постройки:', error),
+                );
+            } else {
+                void showCatalog(player, runtime).catch((error: unknown) =>
+                    ctx.log.error('Ошибка каталога зданий:', error),
+                );
+            }
         });
 
         // Голограмма — только тем, кто реально держит чертёж в руке.

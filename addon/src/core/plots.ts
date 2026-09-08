@@ -181,20 +181,25 @@ export interface EdgeFlags {
 export function chunkOutline(ref: ChunkRef, y: number, step: number = 2, edges: EdgeFlags = { north: true, south: true, east: true, west: true }): Vector3[] {
     const bounds = chunkBounds(ref);
     const points: Vector3[] = [];
-    const push = (x: number, z: number) => points.push({ x: x + 0.5, y, z: z + 0.5 });
     
-    if (edges.north || edges.south) {
-        for (let x = bounds.minX; x <= bounds.maxX; x += step) {
-            if (edges.north) push(x, bounds.minZ);
-            if (edges.south) push(x, bounds.maxZ);
+    if (edges.north) {
+        for (let x = bounds.minX; x <= bounds.maxX + 1; x += step) {
+            points.push({ x, y, z: bounds.minZ });
         }
     }
-    if (edges.west || edges.east) {
-        // Чтобы не дублировать углы, если они уже нарисованы (хотя при слиянии границ углы могут отсутствовать)
-        // Для простоты рисуем весь отрезок
-        for (let z = bounds.minZ; z <= bounds.maxZ; z += step) {
-            if (edges.west && (!edges.north || z > bounds.minZ) && (!edges.south || z < bounds.maxZ)) push(bounds.minX, z);
-            if (edges.east && (!edges.north || z > bounds.minZ) && (!edges.south || z < bounds.maxZ)) push(bounds.maxX, z);
+    if (edges.south) {
+        for (let x = bounds.minX; x <= bounds.maxX + 1; x += step) {
+            points.push({ x, y, z: bounds.maxZ + 1 });
+        }
+    }
+    if (edges.west) {
+        for (let z = bounds.minZ; z <= bounds.maxZ + 1; z += step) {
+            points.push({ x: bounds.minX, y, z });
+        }
+    }
+    if (edges.east) {
+        for (let z = bounds.minZ; z <= bounds.maxZ + 1; z += step) {
+            points.push({ x: bounds.maxX + 1, y, z });
         }
     }
     return points;

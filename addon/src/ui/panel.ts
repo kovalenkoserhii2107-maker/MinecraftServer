@@ -1,6 +1,6 @@
 import { CommandPermissionLevel, system, type Player } from '@minecraft/server';
 import { ActionFormData, ModalFormData } from '@minecraft/server-ui';
-import { listBlueprints } from '../core/blueprints.js';
+import { listBlueprints, type Blueprint } from '../core/blueprints.js';
 import {
     boxAt,
     checkPlot,
@@ -258,7 +258,6 @@ async function showBuilding(player: Player, runtime: EngineRuntime): Promise<voi
 
 /** Каталог: выбор здания активирует голограмму и открывает подтверждение. */
 export async function showCatalog(player: Player, runtime: EngineRuntime): Promise<void> {
-    const config = runtime.config.blueprints;
     const symbol = runtime.config.economy.currencySymbol;
     const blueprints = listBlueprints();
 
@@ -279,11 +278,10 @@ export async function showCatalog(player: Player, runtime: EngineRuntime): Promi
         .body(`${Color.gray}Выбор здания включает контур габарита на месте, куда вы смотрите.${Color.reset}`);
     for (const blueprint of blueprints) {
         form.button(
-            `${blueprint.name}\n${Color.gray}${blueprint.sizeX}×${blueprint.sizeY}×${blueprint.sizeZ} — ` +
-                `${formatMoney(blueprint.price, symbol)}${Color.reset}`,
+            `${blueprint.name}\n${blueprint.sizeX}×${blueprint.sizeY}×${blueprint.sizeZ} — ${formatMoney(blueprint.price, symbol)}`
         );
     }
-    form.button(`${Color.gray}Назад${Color.reset}`);
+    form.button(`Назад`);
 
     const response = await showAction(form, player, runtime.log);
     if (!response || response.canceled || response.selection === undefined) return;
@@ -293,12 +291,16 @@ export async function showCatalog(player: Player, runtime: EngineRuntime): Promi
 
     // Выбор сохраняем сразу: голограмма должна работать ещё до покупки.
     selectBlueprint(player, blueprint);
+    player.sendMessage(`${Color.gray}Чертёж «${blueprint.name}» выбран. Возьмите его в руку, прицельтесь и нажмите (Использовать), чтобы построить.${Color.reset}`);
+}
 
+export async function showConfirmPlacement(player: Player, blueprint: Blueprint, runtime: EngineRuntime): Promise<void> {
+    const config = runtime.config.blueprints;
+    const symbol = runtime.config.economy.currencySymbol;
+    
     const origin = targetOrigin(player, config.raycastDistance);
     if (!origin) {
-        player.sendMessage(
-            `${Color.gray}Выбран «${blueprint.name}». Наведитесь на место постройки — появится контур.${Color.reset}`,
-        );
+        player.sendMessage(`${Color.gray}Наведитесь на место постройки — появится контур.${Color.reset}`);
         return;
     }
 
@@ -310,21 +312,17 @@ export async function showCatalog(player: Player, runtime: EngineRuntime): Promi
         .title('Подтверждение')
         .body(
             [
-                `${Color.gray}Здание: ${Color.yellow}${blueprint.name}${Color.reset}`,
-                `${Color.gray}Габарит: ${blueprint.sizeX}×${blueprint.sizeY}×${blueprint.sizeZ}${Color.reset}`,
-                `${Color.gray}Угол: ${origin.x}, ${origin.y}, ${origin.z}${Color.reset}`,
-                `${Color.gray}Стоимость: ${Color.gold}${formatMoney(blueprint.price, symbol)}${Color.reset}`,
+                `Здание: ${blueprint.name}`,
+                `Габарит: ${blueprint.sizeX}×${blueprint.sizeY}×${blueprint.sizeZ}`,
+                `Угол: ${origin.x}, ${origin.y}, ${origin.z}`,
+                `Стоимость: ${formatMoney(blueprint.price, symbol)}`,
                 '',
-                plot.allowed
-                    ? `${Color.green}Место подходит${Color.reset}`
-                    : `${Color.red}${plot.reason}${Color.reset}`,
-                affordable
-                    ? `${Color.green}Средств достаточно${Color.reset}`
-                    : `${Color.red}Не хватает средств${Color.reset}`,
+                plot.allowed ? `Место подходит` : plot.reason,
+                affordable ? `Средств достаточно` : `Не хватает средств`,
             ].join('\n'),
         )
-        .button(canBuild ? `${Color.green}Построить${Color.reset}` : `${Color.darkGray}Построить нельзя${Color.reset}`)
-        .button(`${Color.gray}Отмена${Color.reset}`);
+        .button(canBuild ? `Построить` : `Построить нельзя`)
+        .button(`Отмена`);
 
     const decision = await showAction(confirm, player, runtime.log);
     if (!decision || decision.canceled || decision.selection !== 0 || !canBuild) return;
