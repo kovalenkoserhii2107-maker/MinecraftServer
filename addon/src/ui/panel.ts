@@ -1,4 +1,4 @@
-import { CommandPermissionLevel, system, type Player } from '@minecraft/server';
+import { CommandPermissionLevel, system, type Player, GameMode } from '@minecraft/server';
 import { ActionFormData, ModalFormData } from '@minecraft/server-ui';
 import { listBlueprints, type Blueprint } from '../core/blueprints.js';
 import {
@@ -441,6 +441,7 @@ async function showPlayerMenu(player: Player, runtime: EngineRuntime): Promise<v
             : `${Color.darkGray}Возврат недоступен${Color.reset}`,
     );
     form.button(`${Color.yellow}Стартовый набор${Color.reset}`);
+    form.button(`${Color.aqua}Режим игры${Color.gray}\nвыживание / творческий${Color.reset}`);
     form.button(`${Color.gray}Назад${Color.reset}`);
 
     const response = await showAction(form, player, runtime.log);
@@ -459,6 +460,23 @@ async function showPlayerMenu(player: Player, runtime: EngineRuntime): Promise<v
             if (!player.isValid) return;
             const result = giveStarterKit(player, runtime.config.welcome);
             player.sendMessage(result.ok ? `${Color.green}${result.message}` : `${Color.red}${result.message}`);
+        });
+        return;
+    }
+    if (response.selection === 2) {
+        apply(() => {
+            if (!player.isValid) return;
+            try {
+                if (player.getGameMode() === GameMode.Creative) {
+                    player.setGameMode(GameMode.Survival);
+                    player.sendMessage(`${Color.green}Установлен режим выживания.${Color.reset}`);
+                } else {
+                    player.setGameMode(GameMode.Creative);
+                    player.sendMessage(`${Color.green}Установлен творческий режим.${Color.reset}`);
+                }
+            } catch (e) {
+                player.sendMessage(`${Color.red}Не удалось сменить режим игры.${Color.reset}`);
+            }
         });
         return;
     }
