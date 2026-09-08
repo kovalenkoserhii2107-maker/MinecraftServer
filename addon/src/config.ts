@@ -21,6 +21,7 @@ export interface EngineConfig {
     readonly device: DeviceConfig;
     readonly economy: EconomyConfig;
     readonly plots: PlotsConfig;
+    readonly blueprints: BlueprintsConfig;
 }
 
 export interface WelcomeConfig {
@@ -117,6 +118,25 @@ export interface PlotsConfig {
     readonly mapRadius: number;
 }
 
+export interface BlueprintsConfig {
+    /** Предмет-чертёж. Как и коммуникатор — ванильный с меткой. */
+    readonly itemType: string;
+    readonly itemName: string;
+    readonly lore: readonly string[];
+    /** Частица габаритного контейнера. */
+    readonly hologramParticle: string;
+    /** Частота перерисовки голограммы, в тиках. */
+    readonly hologramIntervalTicks: number;
+    /** Потолок частиц на игрока за кадр — защита от тяжёлого тика. */
+    readonly hologramMaxPoints: number;
+    /** Дальность луча от глаз игрока до точки постройки, в блоках. */
+    readonly raycastDistance: number;
+    /** Строить можно только внутри собственного участка. */
+    readonly requireOwnPlot: boolean;
+    /** Максимальная сторона сохраняемой структуры, в блоках. */
+    readonly maxSize: number;
+}
+
 export const DEFAULT_CONFIG: EngineConfig = {
     logLevel: LogLevel.Info,
     broadcastErrorsToAdmins: true,
@@ -161,6 +181,21 @@ export const DEFAULT_CONFIG: EngineConfig = {
         taxPerChunk: 25,
         taxIntervalTicks: 12000,
         mapRadius: 4,
+    },
+    blueprints: {
+        itemType: 'minecraft:paper',
+        itemName: '§b§lЧертёж',
+        lore: [
+            '§7Смотрите на место постройки —',
+            '§7контур покажет габарит.',
+            '§7Используйте предмет для выбора здания.',
+        ],
+        hologramParticle: 'minecraft:villager_happy',
+        hologramIntervalTicks: 5,
+        hologramMaxPoints: 120,
+        raycastDistance: 12,
+        requireOwnPlot: true,
+        maxSize: 64,
     },
     device: {
         itemType: 'minecraft:clock',

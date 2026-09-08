@@ -14,6 +14,7 @@ export const EntityComponentTypes = { Health:'minecraft:health', Inventory:'mine
 export const ItemLockMode = { none:'none', inventory:'inventory', slot:'slot' };
 export const DisplaySlotId = { BelowName:'BelowName', List:'List', Sidebar:'Sidebar' };
 export const ObjectiveSortOrder = { Ascending:'Ascending', Descending:'Descending' };
+export const StructureSaveMode = { Memory:'Memory', World:'World' };
 
 export class ItemStack {
   constructor(typeId, amount = 1){
@@ -67,7 +68,10 @@ export class Player extends Entity {
     this.location = opts.location ?? { x: 10.5, y: 64, z: -20.5 };
     this.dimension = { id: 'minecraft:overworld' };
     this.messages = []; this.actionBars = []; this.titles = []; this.sounds = [];
-    this.xp = 0; this.teleports = [];
+    this.xp = 0; this.teleports = []; this.particles = [];
+    this.isSneaking = false; this.selectedSlotIndex = 0;
+    /** Куда «смотрит» игрок: тесты задают результат рейкаста напрямую. */
+    this.viewHit = undefined;
     this.container = new ContainerMock(opts.inventorySize ?? 36);
     this.health = { currentValue: 20, effectiveMax: 20 };
     this.onScreenDisplay = {
@@ -83,6 +87,8 @@ export class Player extends Entity {
   }
   sendMessage(m){ this.messages.push(m); }
   playSound(id, o){ this.sounds.push({ id, o }); }
+  spawnParticle(effectName, location){ this.particles.push({ effectName, location }); }
+  getBlockFromViewDirection(){ return this.viewHit; }
   addExperience(n){ this.xp += n; return this.xp; }
   teleport(loc, opts){ this.teleports.push({ loc, opts }); this.location = loc; }
 }
@@ -105,6 +111,25 @@ class ScoreboardMock {
   clearObjectiveAtDisplaySlot(slot){ const o = this.slots.get(slot); this.slots.delete(slot); return o; }
 }
 
+/** Хранилище структур: запоминает габарит и точки установки. */
+class StructureManagerMock {
+  constructor(){ this.structures = new Map(); this.placements = []; }
+  createFromWorld(id, dimension, from, to){
+    const size = { x: to.x - from.x + 1, y: to.y - from.y + 1, z: to.z - from.z + 1 };
+    const structure = { id, size, isValid: true };
+    this.structures.set(id, structure);
+    return structure;
+  }
+  get(id){ return this.structures.get(id); }
+  delete(id){ return this.structures.delete(id); }
+  getWorldStructureIds(){ return [...this.structures.keys()]; }
+  getPackStructureIds(){ return []; }
+  place(id, dimension, location){
+    if (!this.structures.has(id)) throw new Error(`unknown structure ${id}`);
+    this.placements.push({ id, location });
+  }
+}
+
 class WorldMock extends Props {
   constructor(){
     super();
@@ -120,6 +145,7 @@ class WorldMock extends Props {
       playerInteractWithBlock: new Signal('playerInteractWithBlock'),
     };
     this.scoreboard = new ScoreboardMock();
+    this.structureManager = new StructureManagerMock();
   }
   getAllPlayers(){ return players.filter((p) => p.isValid); }
   sendMessage(m){ this.broadcast.push(m); }

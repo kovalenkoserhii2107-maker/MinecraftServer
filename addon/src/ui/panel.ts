@@ -3,6 +3,8 @@ import { ActionFormData, FormCancelationReason } from '@minecraft/server-ui';
 import { Color, formatCoords, formatDimension, formatMinutes } from '../core/format.js';
 import { formatMoney, getBalance } from '../core/economy.js';
 import { chunkAt, chunkBounds, getOwner, listOwnedChunks } from '../core/plots.js';
+import { ensureMarked } from '../core/markedItem.js';
+import { blueprintItemSpec } from '../mechanics/blueprints.js';
 import { renderPlotMap } from '../mechanics/plots.js';
 import type { Logger } from '../core/logger.js';
 import type { EngineRuntime } from '../core/runtime.js';
@@ -148,7 +150,8 @@ async function showMainMenu(player: Player, runtime: EngineRuntime): Promise<voi
         .title('Панель сервера')
         .body(playerSummary(player))
         .button(`${Color.yellow}Список команд${Color.reset}`)
-        .button(`${Color.green}Участки и карта${Color.reset}`);
+        .button(`${Color.green}Участки и карта${Color.reset}`)
+        .button(`${Color.aqua}Получить чертёж${Color.reset}`);
 
     if (isAdmin) {
         form.button(`${Color.aqua}Механики${Color.reset}`);
@@ -164,6 +167,8 @@ async function showMainMenu(player: Player, runtime: EngineRuntime): Promise<voi
                 `${Color.yellow}/mc:panel${Color.gray} — эта панель\n` +
                 `${Color.yellow}/mc:device${Color.gray} — получить коммуникатор\n` +
                 `${Color.yellow}/mc:balance${Color.gray} — баланс криптогривны\n` +
+                `${Color.yellow}/mc:blueprint${Color.gray} — получить чертёж\n` +
+                `${Color.yellow}/mc:bplist${Color.gray} — список типовых зданий\n` +
                 `${Color.yellow}/mc:claim${Color.gray} — купить участок 16x16 или 32x32\n` +
                 `${Color.yellow}/mc:plotinfo${Color.gray} — чей участок под вами\n` +
                 `${Color.yellow}/mc:unclaim${Color.gray} — продать участок\n` +
@@ -178,7 +183,21 @@ async function showMainMenu(player: Player, runtime: EngineRuntime): Promise<voi
         await showPlotsMenu(player, runtime);
         return;
     }
-    if (isAdmin && response.selection === 2) {
+    if (response.selection === 2) {
+        // Выдача предмета — мутация мира, поэтому отдельным тиком.
+        system.run(() => {
+            if (!player.isValid) return;
+            if (ensureMarked(player, blueprintItemSpec(runtime.config.blueprints))) {
+                player.sendMessage(
+                    `${Color.green}Чертёж выдан. Возьмите его в руку и смотрите на место постройки.${Color.reset}`,
+                );
+            } else {
+                player.sendMessage(`${Color.red}Освободите слот в инвентаре.${Color.reset}`);
+            }
+        });
+        return;
+    }
+    if (isAdmin && response.selection === 3) {
         await showMechanicsMenu(player, runtime);
     }
 }

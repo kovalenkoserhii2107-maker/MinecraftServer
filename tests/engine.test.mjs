@@ -22,12 +22,13 @@ system.beforeEvents.startup.emit({ customCommandRegistry: registry });
 
 check('команды зарегистрированы', () => {
   const names = [...registry.commands.keys()].sort();
-  assert.deepEqual(names, ['mc:back','mc:balance','mc:claim','mc:deathpoint','mc:device','mc:help','mc:kit',
-    'mc:mechanics','mc:panel','mc:plotinfo','mc:stats','mc:toggle','mc:unclaim'].sort());
+  assert.deepEqual(names, ['mc:back','mc:balance','mc:blueprint','mc:bpdelete','mc:bplist','mc:bpsave',
+    'mc:claim','mc:deathpoint','mc:device','mc:help','mc:kit','mc:mechanics','mc:panel','mc:plotinfo',
+    'mc:stats','mc:toggle','mc:unclaim'].sort());
 });
 check('enum механик зарегистрирован до использования', () => {
   assert.deepEqual(registry.enums.get('mc:mechanic_id'),
-    ['device','economy','plots','welcome','death_beacon','playtime_rewards','combat_feedback','admin_panel']);
+    ['device','economy','plots','blueprints','welcome','death_beacon','playtime_rewards','combat_feedback','admin_panel']);
   assert.deepEqual(registry.enums.get('mc:plot_size'), ['16x16','32x32']);
 });
 
@@ -40,10 +41,10 @@ check('команда до worldLoad -> Failure', () => {
 
 // --- 3. Загрузка мира: активация механик ---
 world.afterEvents.worldLoad.emit({});
-check('все 8 механик активны', () => {
+check('все 9 механик активны', () => {
   const r = registry.invoke('mc:mechanics', { sourceEntity: alice });
   assert.equal(r.status, CustomCommandStatus.Success);
-  assert.equal((r.message.match(/вкл/g) ?? []).length, 8);
+  assert.equal((r.message.match(/вкл/g) ?? []).length, 9);
 });
 
 // --- 4. welcome: первый вход выдаёт набор и объявление ---
@@ -177,7 +178,7 @@ check('обычный предмет проигнорирован', () => assert
 
 // Навигация по меню: главное меню -> «Механики» -> переключение первой механики.
 __reset();
-__queueResponses([2, 0]);  // 0 команды, 1 участки, 2 механики
+__queueResponses([3, 0]);  // 0 команды, 1 участки, 2 чертёж, 3 механики
 check('через панель переключается механика', () => {
   world.afterEvents.itemUse.emit({ itemStack: deviceOf(alice), source: alice });
   system.advance(2);
@@ -343,6 +344,160 @@ check('карта показывает свой участок и легенду
   assert.ok(map.body.includes('▣'), 'нет отметки положения игрока');
   assert.ok(map.body.includes('свободно'), 'нет легенды');
   assert.ok(map.body.includes('Ваших чанков: '), 'нет счётчика владений');
+});
+
+
+// --- 8g. Чертежи ---
+const dave = __addPlayer(new Player('Dave', { op: true }));
+world.afterEvents.playerSpawn.emit({ player: dave, initialSpawn: true });
+system.advance(60);
+dave.setDynamicProperty('mc:balance', 100000);
+
+const bpItem = () => dave.container.items.find((i) => i.getDynamicProperty('mc:blueprint') === true);
+const lookAt = (p, x, y, z, face = 'Up') => {
+  p.viewHit = { block: new Block(x, y, z, p.dimension), face, faceLocation: { x, y, z } };
+};
+
+check('/mc:blueprint выдаёт защищённый предмет', () => {
+  registry.invoke('mc:blueprint', { sourceEntity: dave });
+  system.advance(2);
+  const item = bpItem();
+  assert.ok(item, 'чертёж не выдан');
+  assert.equal(item.typeId, 'minecraft:paper');
+  assert.ok(item.nameTag.includes('Чертёж'));
+});
+
+check('присед + использование отмечают углы области', () => {
+  dave.isSneaking = true;
+  lookAt(dave, 100, 64, 100);
+  world.afterEvents.itemUse.emit({ itemStack: bpItem(), source: dave });
+  system.advance(2);
+  lookAt(dave, 104, 67, 103);
+  world.afterEvents.itemUse.emit({ itemStack: bpItem(), source: dave });
+  system.advance(2);
+  dave.isSneaking = false;
+  assert.deepEqual(dave.getDynamicProperty('mc:bp_corner_a'), { x: 100, y: 65, z: 100 });
+  assert.deepEqual(dave.getDynamicProperty('mc:bp_corner_b'), { x: 104, y: 68, z: 103 });
+});
+
+check('/mc:bpsave снимает структуру и регистрирует чертёж', () => {
+  const r = registry.invoke('mc:bpsave', { sourceEntity: dave }, 'Домик', 3000);
+  assert.equal(r.status, CustomCommandStatus.Success, r.message);
+  system.advance(2);
+  const structure = world.structureManager.get('mc:bp_домик');
+  assert.ok(structure, 'структура не снята');
+  assert.deepEqual(structure.size, { x: 5, y: 4, z: 4 });
+  assert.ok(dave.messages.some((m) => m.includes('5×4×4')), 'нет подтверждения габарита');
+});
+
+check('/mc:bplist показывает чертёж с ценой', () => {
+  const r = registry.invoke('mc:bplist', { sourceEntity: dave });
+  assert.ok(r.message.includes('Домик'), r.message);
+  assert.ok(r.message.includes('3'), r.message);
+});
+
+check('слишком большая область отклоняется', () => {
+  dave.setDynamicProperty('mc:bp_corner_a', { x: 0, y: 0, z: 0 });
+  dave.setDynamicProperty('mc:bp_corner_b', { x: 200, y: 10, z: 10 });
+  const r = registry.invoke('mc:bpsave', { sourceEntity: dave }, 'Огромный', 1);
+  assert.equal(r.status, CustomCommandStatus.Failure);
+  assert.ok(r.message.includes('64'), r.message);
+});
+
+// Габарит и контур считаются чистыми функциями — проверяем их напрямую.
+const { boxAt, boxOutline, checkPlot, targetOrigin } = await import('../addon/scripts/mechanics/blueprints.js');
+const houseBp = { id:'домик', name:'Домик', structureId:'mc:bp_домик', sizeX:5, sizeY:4, sizeZ:4, price:3000 };
+
+check('габарит растёт от точки установки', () => {
+  const box = boxAt({ x: 10, y: 64, z: 10 }, houseBp);
+  assert.deepEqual(box.min, { x: 10, y: 64, z: 10 });
+  assert.deepEqual(box.max, { x: 14, y: 67, z: 13 });
+});
+check('контур укладывается в лимит частиц', () => {
+  const big = { ...houseBp, sizeX: 60, sizeY: 40, sizeZ: 60 };
+  const points = boxOutline(boxAt({ x: 0, y: 0, z: 0 }, big), 120);
+  assert.ok(points.length <= 200, `точек ${points.length}`);
+  assert.ok(points.length > 0);
+});
+check('рейкаст выбирает блок у грани, на которую смотрит игрок', () => {
+  lookAt(dave, 50, 64, 50, 'Up');
+  assert.deepEqual(targetOrigin(dave, 12), { x: 50, y: 65, z: 50 });
+  lookAt(dave, 50, 64, 50, 'North');
+  assert.deepEqual(targetOrigin(dave, 12), { x: 50, y: 64, z: 49 });
+});
+
+// --- 8h. Приват: главное требование ---
+const bpConfig = { requireOwnPlot: true };
+
+check('на своём участке строить можно', () => {
+  dave.location = { x: 8, y: 64, z: 8 };
+  registry.invoke('mc:claim', { sourceEntity: dave }, '16x16');
+  const box = boxAt({ x: 4, y: 64, z: 4 }, houseBp);
+  assert.equal(checkPlot(dave, box, bpConfig).allowed, true);
+});
+check('габарит, вылезающий за свой участок, отклоняется', () => {
+  // Дом 5 блоков шириной от x=14 уходит в соседний чанк.
+  const box = boxAt({ x: 14, y: 64, z: 4 }, houseBp);
+  const result = checkPlot(dave, box, bpConfig);
+  assert.equal(result.allowed, false);
+  assert.ok(result.reason.includes('за пределы'), result.reason);
+});
+check('на чужом участке строить нельзя', () => {
+  alice.location = { x: 200 * 16 + 8, y: 64, z: 8 };
+  registry.invoke('mc:claim', { sourceEntity: alice }, '16x16');
+  const box = boxAt({ x: 200 * 16 + 4, y: 64, z: 4 }, houseBp);
+  const result = checkPlot(dave, box, bpConfig);
+  assert.equal(result.allowed, false);
+  assert.ok(result.reason.includes('Alice'), result.reason);
+});
+check('без требования участка ничейная земля разрешена', () => {
+  const box = boxAt({ x: 900, y: 64, z: 900 }, houseBp);
+  assert.equal(checkPlot(dave, box, { requireOwnPlot: false }).allowed, true);
+});
+
+// --- 8i. Голограмма и постройка ---
+check('голограмма рисуется только с выбранным чертежом в руке', () => {
+  dave.particles.length = 0;
+  dave.location = { x: 8, y: 64, z: 8 };
+  lookAt(dave, 4, 64, 4);
+  system.advance(6);
+  assert.equal(dave.particles.length, 0, 'чертёж не выбран — частиц быть не должно');
+
+  dave.setDynamicProperty('mc:bp_selected', 'домик');
+  dave.selectedSlotIndex = dave.container.slots.findIndex((i) => i && i.getDynamicProperty('mc:blueprint'));
+  system.advance(6);
+  assert.ok(dave.particles.length > 0, 'контур не нарисован');
+  assert.equal(dave.particles[0].effectName, 'minecraft:villager_happy');
+});
+check('над чужим участком контур меняет частицу на предупреждающую', () => {
+  dave.particles.length = 0;
+  lookAt(dave, 200 * 16 + 4, 64, 4);
+  system.advance(6);
+  assert.ok(dave.particles.length > 0);
+  assert.equal(dave.particles[0].effectName, 'minecraft:basic_flame_particle');
+});
+
+__reset();
+__queueResponses([0, 0]);   // выбрать «Домик», затем «Построить»
+check('покупка через меню ставит структуру и списывает цену', () => {
+  dave.particles.length = 0;
+  lookAt(dave, 4, 64, 4);
+  dave.setDynamicProperty('mc:balance', 100000);
+  world.afterEvents.itemUse.emit({ itemStack: bpItem(), source: dave });
+  system.advance(2);
+});
+await new Promise((r) => setImmediate(r));
+system.advance(2);
+await new Promise((r) => setImmediate(r));
+system.advance(2);
+check('структура установлена в точке под курсором', () => {
+  const placed = world.structureManager.placements.at(-1);
+  assert.ok(placed, 'структура не установлена');
+  assert.equal(placed.id, 'mc:bp_домик');
+  assert.deepEqual(placed.location, { x: 4, y: 65, z: 4 });
+});
+check('со счёта списана стоимость здания', () => {
+  assert.equal(dave.getDynamicProperty('mc:balance'), 100000 - 3000);
 });
 
 // --- 9. Отключение механики снимает подписки и таймеры ---
