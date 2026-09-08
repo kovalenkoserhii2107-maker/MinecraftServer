@@ -109,53 +109,62 @@ async function showTerritories(player: Player, runtime: EngineRuntime): Promise<
 
     const form = new ActionFormData()
         .title('Территории')
-        .body(body)
-        .button(`${Color.yellow}Информация об участке${Color.reset}`)
-        .button(`${Color.green}Купить 16×16${Color.gray}\n${formatMoney(config.cost16, symbol)}${Color.reset}`)
-        .button(`${Color.green}Купить 32×32${Color.gray}\n${formatMoney(config.cost32, symbol)}${Color.reset}`);
+        .body(body);
+        
+    const actions: (() => Promise<void> | void)[] = [];
+
+    form.button(`${Color.yellow}Информация об участке${Color.reset}`);
+    actions.push(async () => showPlotInfo(player, runtime));
+
+    form.button(`${Color.green}Купить 16×16${Color.gray}\n${formatMoney(config.cost16, symbol)}${Color.reset}`);
+    actions.push(() => {
+        apply(() => {
+            if (!player.isValid) return;
+            const result = claimPlot(player, 16, config, symbol);
+            player.sendMessage(result.ok ? `${Color.green}${result.message}` : `${Color.red}${result.message}`);
+        });
+    });
+
+    form.button(`${Color.green}Купить 32×32${Color.gray}\n${formatMoney(config.cost32, symbol)}${Color.reset}`);
+    actions.push(() => {
+        apply(() => {
+            if (!player.isValid) return;
+            const result = claimPlot(player, 32, config, symbol);
+            player.sendMessage(result.ok ? `${Color.green}${result.message}` : `${Color.red}${result.message}`);
+        });
+    });
 
     const isMine = owner?.id === player.id;
     if (isMine) {
         const refund = Math.floor(config.cost16 * config.refundRatio);
         form.button(`${Color.red}Продать участок${Color.gray}\n+${formatMoney(refund, symbol)}${Color.reset}`);
+        actions.push(() => {
+            apply(() => {
+                if (!player.isValid) return;
+                const result = unclaimPlot(player, config, symbol);
+                player.sendMessage(result.ok ? `${Color.green}${result.message}` : `${Color.red}${result.message}`);
+            });
+        });
     }
+
+    const showBorders = player.getDynamicProperty('mc:show_plot_borders') === true;
+    form.button(`${Color.lightPurple}${showBorders ? 'Скрыть' : 'Показать'} границы${Color.gray}\nчужих и своих участков${Color.reset}`);
+    actions.push(() => {
+        apply(() => {
+            if (!player.isValid) return;
+            player.setDynamicProperty('mc:show_plot_borders', !showBorders);
+            player.sendMessage(`${Color.green}Отображение границ участков ${!showBorders ? 'включено' : 'выключено'}.${Color.reset}`);
+        });
+    });
+
     form.button(`${Color.gray}Назад${Color.reset}`);
+    actions.push(async () => showMainMenu(player, runtime));
 
     const response = await showAction(form, player, runtime.log);
     if (!response || response.canceled || response.selection === undefined) return;
 
-    switch (response.selection) {
-        case 0:
-            await showPlotInfo(player, runtime);
-            return;
-        case 1:
-        case 2: {
-            const size = response.selection === 1 ? 16 : 32;
-            apply(() => {
-                if (!player.isValid) return;
-                const result = claimPlot(player, size, config, symbol);
-                player.sendMessage(
-                    result.ok ? `${Color.green}${result.message}` : `${Color.red}${result.message}`,
-                );
-            });
-            return;
-        }
-        case 3:
-            if (isMine) {
-                apply(() => {
-                    if (!player.isValid) return;
-                    const result = unclaimPlot(player, config, symbol);
-                    player.sendMessage(
-                        result.ok ? `${Color.green}${result.message}` : `${Color.red}${result.message}`,
-                    );
-                });
-                return;
-            }
-            await showMainMenu(player, runtime);
-            return;
-        default:
-            await showMainMenu(player, runtime);
-    }
+    const action = actions[response.selection];
+    if (action) await action();
 }
 
 async function showPlotInfo(player: Player, runtime: EngineRuntime): Promise<void> {
@@ -200,59 +209,51 @@ async function showBuilding(player: Player, runtime: EngineRuntime): Promise<voi
         .title('Строительство')
         .body(
             `${Color.gray}Возьмите чертёж в руку и смотрите на место — контур покажет габарит.\n` +
-                `Разметка области: ${Color.yellow}${marked}${Color.reset}`,
-        )
-        .button(`${Color.aqua}Каталог зданий${Color.reset}`)
-        .button(`${Color.yellow}Получить чертёж${Color.reset}`);
+            `${Color.gray}Сохранение чертежа: отметьте 2 угла по диагонали (один снизу, второй сверху).\n` +
+            `Разметка области: ${Color.yellow}${marked}${Color.reset}`,
+        );
+
+    const actions: (() => Promise<void> | void)[] = [];
+
+    form.button(`${Color.aqua}Каталог зданий${Color.reset}`);
+    actions.push(async () => showCatalog(player, runtime));
+
+    form.button(`${Color.yellow}Получить чертёж${Color.reset}`);
+    actions.push(() => {
+        apply(() => {
+            if (!player.isValid) return;
+            const spec = {
+                key: 'mc:blueprint',
+                itemType: config.itemType,
+                itemName: config.itemName,
+                lore: config.lore,
+                // Чертёж можно класть в сундук — в отличие от коммуникатора.
+                lockInInventory: false,
+            };
+            player.sendMessage(
+                ensureMarked(player, spec)
+                    ? `${Color.green}Чертёж выдан.${Color.reset}`
+                    : `${Color.red}Освободите слот в инвентаре.${Color.reset}`,
+            );
+        });
+    });
+
+    form.button(`${Color.green}Сохранить чертёж${Color.gray}\nиз отмеченной области${Color.reset}`);
+    actions.push(async () => showSaveBlueprint(player, runtime));
 
     if (isAdmin(player)) {
-        form.button(`${Color.green}Сохранить чертёж${Color.gray}\nиз отмеченной области${Color.reset}`);
         form.button(`${Color.red}Удалить чертёж${Color.reset}`);
+        actions.push(async () => showDeleteBlueprint(player, runtime));
     }
+
     form.button(`${Color.gray}Назад${Color.reset}`);
+    actions.push(async () => showMainMenu(player, runtime));
 
     const response = await showAction(form, player, runtime.log);
     if (!response || response.canceled || response.selection === undefined) return;
 
-    switch (response.selection) {
-        case 0:
-            await showCatalog(player, runtime);
-            return;
-        case 1:
-            apply(() => {
-                if (!player.isValid) return;
-                const spec = {
-                    key: 'mc:blueprint',
-                    itemType: config.itemType,
-                    itemName: config.itemName,
-                    lore: config.lore,
-                    // Чертёж можно класть в сундук — в отличие от коммуникатора.
-                    lockInInventory: false,
-                };
-                player.sendMessage(
-                    ensureMarked(player, spec)
-                        ? `${Color.green}Чертёж выдан.${Color.reset}`
-                        : `${Color.red}Освободите слот в инвентаре.${Color.reset}`,
-                );
-            });
-            return;
-        case 2:
-            if (isAdmin(player)) {
-                await showSaveBlueprint(player, runtime);
-                return;
-            }
-            await showMainMenu(player, runtime);
-            return;
-        case 3:
-            if (isAdmin(player)) {
-                await showDeleteBlueprint(player, runtime);
-                return;
-            }
-            await showMainMenu(player, runtime);
-            return;
-        default:
-            await showMainMenu(player, runtime);
-    }
+    const action = actions[response.selection];
+    if (action) await action();
 }
 
 /** Каталог: выбор здания активирует голограмму и открывает подтверждение. */

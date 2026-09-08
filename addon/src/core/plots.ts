@@ -1,4 +1,4 @@
-import { world, type Player } from '@minecraft/server';
+import { world, type Player, type Vector3 } from '@minecraft/server';
 import type { PlotsConfig } from '../config.js';
 import { canAfford, chargeFrom, formatMoney, payTo } from './economy.js';
 import { Color } from './format.js';
@@ -168,6 +168,23 @@ export function chunkBounds(ref: ChunkRef): { minX: number; minZ: number; maxX: 
         maxX: ref.cx * 16 + 15,
         maxZ: ref.cz * 16 + 15,
     };
+}
+
+/** Возвращает точки по периметру чанка на заданной высоте (Y) с заданным шагом. */
+export function chunkOutline(ref: ChunkRef, y: number, step: number = 2): Vector3[] {
+    const bounds = chunkBounds(ref);
+    const points: Vector3[] = [];
+    const push = (x: number, z: number) => points.push({ x: x + 0.5, y, z: z + 0.5 });
+    
+    for (let x = bounds.minX; x <= bounds.maxX; x += step) {
+        push(x, bounds.minZ);
+        push(x, bounds.maxZ);
+    }
+    for (let z = bounds.minZ + step; z < bounds.maxZ; z += step) {
+        push(bounds.minX, z);
+        push(bounds.maxX, z);
+    }
+    return points;
 }
 
 export interface PlotActionResult {

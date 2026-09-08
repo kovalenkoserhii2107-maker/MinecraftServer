@@ -2,7 +2,7 @@ import { Player, system, world } from '@minecraft/server';
 import { failure, info } from '../core/format.js';
 import { formatMoney, payTo } from '../core/economy.js';
 import { defineMechanic, type MechanicContext } from '../core/mechanic.js';
-import { chunkAt, getOwner, listOwnedChunks } from '../core/plots.js';
+import { chunkAt, getOwner, listOwnedChunks, chunkOutline } from '../core/plots.js';
 
 
 /** Отказы приходят пачками (зажатая кнопка) — не спамим чат. */
@@ -100,6 +100,38 @@ export const plotsMechanic = defineMechanic({
                 }
             });
         }
+
+        ctx.store.runInterval('plotBorders', 15, () => {
+            for (const player of world.getAllPlayers()) {
+                if (!player.isValid) continue;
+                if (player.getDynamicProperty('mc:show_plot_borders') !== true) continue;
+
+                const center = chunkAt(player.dimension.id, player.location.x, player.location.z);
+                const y = player.location.y + 0.1;
+                
+                // Проверяем чанки вокруг игрока (радиус 1)
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dz = -1; dz <= 1; dz++) {
+                        const ref = { dimensionId: center.dimensionId, cx: center.cx + dx, cz: center.cz + dz };
+                        const owner = getOwner(ref);
+                        if (!owner) continue;
+
+                        const isMine = owner.id === player.id;
+                        const particle = isMine ? 'minecraft:villager_happy' : 'minecraft:basic_flame_particle';
+                        
+                        // Шаг 2 блока для оптимизации (8 частиц на сторону)
+                        const points = chunkOutline(ref, y, 2);
+                        for (const point of points) {
+                            try {
+                                player.spawnParticle(particle, point);
+                            } catch {
+                                // Если точка за границей прогрузки — молча игнорируем
+                            }
+                        }
+                    }
+                }
+            }
+        });
 
         ctx.store.subscribe(world.afterEvents.playerLeave, 'playerLeave', (event) => {
             lastWarning.delete(event.playerId);
