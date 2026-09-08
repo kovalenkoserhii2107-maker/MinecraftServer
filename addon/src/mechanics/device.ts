@@ -39,6 +39,7 @@ const deviceCommand: MechanicCommand = {
 
         // Выдача предмета — мутация мира, в read-only обработчике запрещена.
         defer(runtime.log, 'device:give', () => {
+            world.sendMessage(`§e[DEBUG] Executing device:give for ${player.name}`);
             if (!player.isValid) return;
             const container = inventoryOf(player);
             if (container && hasMarked(container, KEY_DEVICE)) {

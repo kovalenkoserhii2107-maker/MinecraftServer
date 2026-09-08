@@ -44,9 +44,9 @@ world.afterEvents.worldLoad.emit({});
 world.afterEvents.playerSpawn.emit({ player: alice, initialSpawn: true });
 await pump(60);
 
-const deviceOf = (p) => p.container.items.find((i) => i.getDynamicProperty('mc:device') === true);
-const bpItemOf = (p) => p.container.items.find((i) => i.getDynamicProperty('mc:blueprint') === true);
-const kitItems = (p) => p.container.items.filter((i) => !i.getDynamicProperty('mc:device') && !i.getDynamicProperty('mc:blueprint'));
+const deviceOf = (p) => p.container.items.find((i) => i.lore.some(l => l.includes('mc:device')));
+const bpItemOf = (p) => p.container.items.find((i) => i.lore.some(l => l.includes('mc:blueprint')));
+const kitItems = (p) => p.container.items.filter((i) => !i.lore.some(l => l.includes('mc:device')) && !i.lore.some(l => l.includes('mc:blueprint')));
 
 check('активны 8 механик', () => {
     const active = world.broadcast.find((m) => m.includes('Движок механик загружен'));
@@ -304,7 +304,7 @@ check('подтверждение показывает габарит и вер�
 // --- 8. Голограмма ---
 check('контур рисуется только с выбранным чертежом в руке', () => {
     alice.particles.length = 0;
-    alice.selectedSlotIndex = alice.container.slots.findIndex((i) => i && i.getDynamicProperty('mc:blueprint'));
+    alice.selectedSlotIndex = alice.container.slots.findIndex((i) => i && i.lore.some(l => l.includes('mc:blueprint')));
     lookAt(alice, 4, 64, 4);
     system.advance(6);
     assert.ok(alice.particles.length > 0, 'контур не нарисован');

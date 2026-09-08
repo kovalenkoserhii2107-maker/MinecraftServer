@@ -1,11 +1,12 @@
 import { EntityComponentTypes, ItemLockMode, ItemStack, type Container, type Player } from '@minecraft/server';
 
 /**
- * Служебные предметы движка (коммуникатор, чертёж) опознаются по dynamic
- * property на самом ItemStack.
+ * Служебные предметы движка (коммуникатор, чертёж) опознаются по специальной
+ * скрытой строке в lore (описании).
  *
- * Название и тип подделываются наковальней, а свойство предмета — нет: копия,
- * переименованная вручную, метки не получит и работать не будет.
+ * Dynamic properties не поддерживаются для стакуемых предметов (minecraft:clock,
+ * minecraft:paper). Название подделывается наковальней, но lore выживание
+ * изменить не может, поэтому защита надёжна.
  */
 
 export interface MarkedItemSpec {
@@ -18,20 +19,19 @@ export interface MarkedItemSpec {
     readonly lockInInventory: boolean;
 }
 
+/** Невидимый префикс для скрытия технических данных в lore. */
+const LORE_MARKER = '§r§0§r§0§r';
+
 export function isMarked(item: ItemStack | undefined, key: string): boolean {
     if (!item) return false;
-    try {
-        return item.getDynamicProperty(key) === true;
-    } catch {
-        return false;
-    }
+    const lore = item.getLore();
+    return lore.some((line) => line === `${LORE_MARKER}${key}`);
 }
 
 export function createMarked(spec: MarkedItemSpec): ItemStack {
     const item = new ItemStack(spec.itemType, 1);
     item.nameTag = spec.itemName;
-    item.setLore([...spec.lore]);
-    item.setDynamicProperty(spec.key, true);
+    item.setLore([...spec.lore, `${LORE_MARKER}${spec.key}`]);
     // Служебный предмет незачем терять при смерти.
     item.keepOnDeath = true;
     if (spec.lockInInventory) item.lockMode = ItemLockMode.inventory;
@@ -72,6 +72,10 @@ export function ensureMarked(player: Player, spec: MarkedItemSpec): boolean {
     if (!container) return false;
     if (hasMarked(container, spec.key)) return true;
     if (container.emptySlotsCount === 0) return false;
-    container.addItem(createMarked(spec));
+    const leftover = container.addItem(createMarked(spec));
+    if (leftover) {
+        player.sendMessage(`§c[DEBUG] addItem failed! Leftover item amount: ${leftover.amount}`);
+        return false;
+    }
     return true;
 }
