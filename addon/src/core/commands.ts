@@ -30,6 +30,12 @@ const MECHANIC_ENUM = `${COMMAND_NAMESPACE}:mechanic_id`;
  */
 export interface MechanicCommand {
     readonly definition: CustomCommand;
+    /**
+     * Enum-параметры команды: имя (с namespace `mc:`) -> допустимые значения.
+     * Регистрируются до самой команды — движок иначе отвергнет ссылку на
+     * неизвестный enum.
+     */
+    readonly enums?: Readonly<Record<string, readonly string[]>>;
     handler(origin: CustomCommandOrigin, ...args: unknown[]): CustomCommandResult;
 }
 
@@ -80,6 +86,13 @@ export function registerCommands(
 
     for (const mechanic of mechanics) {
         for (const command of mechanic.commands ?? []) {
+            for (const [name, values] of Object.entries(command.enums ?? {})) {
+                try {
+                    registry.registerEnum(name, [...values]);
+                } catch (error) {
+                    log.error(`Не удалось зарегистрировать enum ${name}:`, error);
+                }
+            }
             register(registry, command, log, mechanic);
         }
     }

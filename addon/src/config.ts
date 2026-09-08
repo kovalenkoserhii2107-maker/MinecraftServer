@@ -18,6 +18,9 @@ export interface EngineConfig {
     readonly deathBeacon: DeathBeaconConfig;
     readonly playtime: PlaytimeConfig;
     readonly combat: CombatConfig;
+    readonly device: DeviceConfig;
+    readonly economy: EconomyConfig;
+    readonly plots: PlotsConfig;
 }
 
 export interface WelcomeConfig {
@@ -56,6 +59,64 @@ export interface CombatConfig {
     readonly lowHealthCooldownTicks: number;
 }
 
+export interface DeviceConfig {
+    /**
+     * Предмет, играющий роль коммуникатора.
+     *
+     * Здесь ванильный предмет, а не собственный: кастомному предмету нужен
+     * resource pack с текстурой и названием, иначе в руках у игрока будет
+     * «отсутствующая текстура». Когда resource pack появится, достаточно
+     * поменять идентификатор здесь.
+     */
+    readonly itemType: string;
+    /** Название в руках. Оно же отличает коммуникатор от обычного предмета. */
+    readonly itemName: string;
+    /** Подсказка под названием. */
+    readonly lore: readonly string[];
+    /** Выдавать при входе, если у игрока его нет. */
+    readonly giveOnJoin: boolean;
+    /** Запретить выбрасывать и убирать в сундуки. */
+    readonly lockInInventory: boolean;
+}
+
+export interface EconomyConfig {
+    /** Название валюты в сообщениях. */
+    readonly currencyName: string;
+    /** Короткий знак рядом с суммой. */
+    readonly currencySymbol: string;
+    /** Сколько получает игрок при первом входе. */
+    readonly startingBalance: number;
+    /**
+     * Показывать баланс на боковой панели (правый край экрана).
+     *
+     * Это единственный способ держать постоянное число на экране без resource
+     * pack. Побочный эффект: боковая панель общая, поэтому игроки видят
+     * балансы друг друга.
+     */
+    readonly showSidebar: boolean;
+    /** Заголовок боковой панели. */
+    readonly sidebarTitle: string;
+    /** Период страховочной синхронизации боковой панели, в тиках. */
+    readonly sidebarRefreshTicks: number;
+}
+
+export interface PlotsConfig {
+    /** Цена участка 16×16 (один чанк). */
+    readonly cost16: number;
+    /** Цена участка 32×32 (четыре чанка). */
+    readonly cost32: number;
+    /** Доля цены, возвращаемая при отказе от участка (0..1). */
+    readonly refundRatio: number;
+    /** Максимум чанков во владении одного игрока. 0 — без ограничения. */
+    readonly maxChunksPerPlayer: number;
+    /** Налоговые поступления с одного чанка за цикл. */
+    readonly taxPerChunk: number;
+    /** Период начисления налогов, в тиках. 12000 тиков = 10 минут. */
+    readonly taxIntervalTicks: number;
+    /** Радиус карты участков в чанках (4 => сетка 9×9). */
+    readonly mapRadius: number;
+}
+
 export const DEFAULT_CONFIG: EngineConfig = {
     logLevel: LogLevel.Info,
     broadcastErrorsToAdmins: true,
@@ -83,6 +144,30 @@ export const DEFAULT_CONFIG: EngineConfig = {
         showTargetHealth: true,
         lowHealthRatio: 0.3,
         lowHealthCooldownTicks: 100,
+    },
+    economy: {
+        currencyName: 'криптогривна',
+        currencySymbol: '₴',
+        startingBalance: 100000,
+        showSidebar: true,
+        sidebarTitle: '§6Криптогривна',
+        sidebarRefreshTicks: 100,
+    },
+    plots: {
+        cost16: 5000,
+        cost32: 18000,
+        refundRatio: 0.5,
+        maxChunksPerPlayer: 0,
+        taxPerChunk: 25,
+        taxIntervalTicks: 12000,
+        mapRadius: 4,
+    },
+    device: {
+        itemType: 'minecraft:clock',
+        itemName: '§b§lКоммуникатор',
+        lore: ['§7Используйте предмет,', '§7чтобы открыть панель сервера'],
+        giveOnJoin: true,
+        lockInInventory: true,
     },
 };
 
