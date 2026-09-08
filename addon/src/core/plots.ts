@@ -170,19 +170,32 @@ export function chunkBounds(ref: ChunkRef): { minX: number; minZ: number; maxX: 
     };
 }
 
+export interface EdgeFlags {
+    north: boolean; // z = minZ
+    south: boolean; // z = maxZ
+    east: boolean;  // x = maxX
+    west: boolean;  // x = minX
+}
+
 /** Возвращает точки по периметру чанка на заданной высоте (Y) с заданным шагом. */
-export function chunkOutline(ref: ChunkRef, y: number, step: number = 2): Vector3[] {
+export function chunkOutline(ref: ChunkRef, y: number, step: number = 2, edges: EdgeFlags = { north: true, south: true, east: true, west: true }): Vector3[] {
     const bounds = chunkBounds(ref);
     const points: Vector3[] = [];
     const push = (x: number, z: number) => points.push({ x: x + 0.5, y, z: z + 0.5 });
     
-    for (let x = bounds.minX; x <= bounds.maxX; x += step) {
-        push(x, bounds.minZ);
-        push(x, bounds.maxZ);
+    if (edges.north || edges.south) {
+        for (let x = bounds.minX; x <= bounds.maxX; x += step) {
+            if (edges.north) push(x, bounds.minZ);
+            if (edges.south) push(x, bounds.maxZ);
+        }
     }
-    for (let z = bounds.minZ + step; z < bounds.maxZ; z += step) {
-        push(bounds.minX, z);
-        push(bounds.maxX, z);
+    if (edges.west || edges.east) {
+        // Чтобы не дублировать углы, если они уже нарисованы (хотя при слиянии границ углы могут отсутствовать)
+        // Для простоты рисуем весь отрезок
+        for (let z = bounds.minZ; z <= bounds.maxZ; z += step) {
+            if (edges.west && (!edges.north || z > bounds.minZ) && (!edges.south || z < bounds.maxZ)) push(bounds.minX, z);
+            if (edges.east && (!edges.north || z > bounds.minZ) && (!edges.south || z < bounds.maxZ)) push(bounds.maxX, z);
+        }
     }
     return points;
 }

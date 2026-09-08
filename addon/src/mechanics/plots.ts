@@ -107,7 +107,7 @@ export const plotsMechanic = defineMechanic({
                 if (player.getDynamicProperty('mc:show_plot_borders') !== true) continue;
 
                 const center = chunkAt(player.dimension.id, player.location.x, player.location.z);
-                const y = player.location.y + 0.1;
+                const baseHeight = player.location.y + 0.1;
                 
                 // Проверяем чанки вокруг игрока (радиус 1)
                 for (let dx = -1; dx <= 1; dx++) {
@@ -118,16 +118,50 @@ export const plotsMechanic = defineMechanic({
 
                         const isMine = owner.id === player.id;
                         const particle = isMine ? 'minecraft:villager_happy' : 'minecraft:basic_flame_particle';
-                        
-                        // Шаг 0.5 блока для сплошной линии свечения (32 частицы на сторону)
-                        const points = chunkOutline(ref, y, 0.5);
-                        for (const point of points) {
-                            try {
-                                player.spawnParticle(particle, point);
-                            } catch {
-                                // Если точка за границей прогрузки — молча игнорируем
+
+                        // Получаем владельцев соседних чанков
+                        const nOwner = getOwner({ dimensionId: ref.dimensionId, cx: ref.cx, cz: ref.cz - 1 });
+                        const sOwner = getOwner({ dimensionId: ref.dimensionId, cx: ref.cx, cz: ref.cz + 1 });
+                        const eOwner = getOwner({ dimensionId: ref.dimensionId, cx: ref.cx + 1, cz: ref.cz });
+                        const wOwner = getOwner({ dimensionId: ref.dimensionId, cx: ref.cx - 1, cz: ref.cz });
+
+                        // Функция вычисления высоты для грани (своя грань поднимается, если сосед - чужой)
+                        // Но пользователь просил: "Свои обозначения ниже, а над ними чужие"
+                        // Значит, если мы рисуем СВОЙ чанк (isMine), высота базовая.
+                        // Если мы рисуем ЧУЖОЙ чанк (!isMine), и он граничит со СВОИМ (neighbor is mine), высота должна быть выше (baseHeight + 1.0).
+                        const getHeight = (neighborOwner: typeof nOwner) => {
+                            if (!isMine && neighborOwner && neighborOwner.id === player.id) {
+                                return baseHeight + 1.0;
                             }
-                        }
+                            return baseHeight;
+                        };
+
+                        // Флаги видимости граней:
+                        // Не рисуем, если сосед принадлежит ТОМУ ЖЕ владельцу
+                        const edges = {
+                            north: nOwner?.id !== owner.id,
+                            south: sOwner?.id !== owner.id,
+                            east:  eOwner?.id !== owner.id,
+                            west:  wOwner?.id !== owner.id,
+                        };
+
+                        // Отрисовываем каждую грань отдельно, если у неё может быть своя высота
+                        const drawEdge = (flag: boolean, height: number, singleEdge: typeof edges) => {
+                            if (!flag) return;
+                            const points = chunkOutline(ref, height, 0.5, singleEdge);
+                            for (const point of points) {
+                                try {
+                                    player.spawnParticle(particle, point);
+                                } catch {
+                                    // вне прогрузки
+                                }
+                            }
+                        };
+
+                        drawEdge(edges.north, getHeight(nOwner), { north: true, south: false, east: false, west: false });
+                        drawEdge(edges.south, getHeight(sOwner), { north: false, south: true, east: false, west: false });
+                        drawEdge(edges.east,  getHeight(eOwner), { north: false, south: false, east: true, west: false });
+                        drawEdge(edges.west,  getHeight(wOwner), { north: false, south: false, east: false, west: true });
                     }
                 }
             }

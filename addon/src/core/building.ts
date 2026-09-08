@@ -73,28 +73,22 @@ export function targetOrigin(player: Player, distance: number): Vector3 | undefi
  */
 export function boxOutline(box: BoundingBox, maxPoints: number): Vector3[] {
     const { min, max } = box;
-    const edgeLength = (max.x - min.x + (max.y - min.y) + (max.z - min.z)) * 4 + 12;
+    const edgeLength = (max.x - min.x + (max.z - min.z)) * 2;
     const step = Math.max(1, Math.ceil(edgeLength / Math.max(1, maxPoints)));
 
     const points: Vector3[] = [];
-    const push = (x: number, y: number, z: number) => points.push({ x: x + 0.5, y: y + 0.5, z: z + 0.5 });
+    const y = min.y;
+    const push = (x: number, z: number) => points.push({ x: x + 0.5, y: y + 0.5, z: z + 0.5 });
 
-    for (const y of [min.y, max.y]) {
-        for (let x = min.x; x <= max.x; x += step) {
-            push(x, y, min.z);
-            push(x, y, max.z);
-        }
-        for (let z = min.z; z <= max.z; z += step) {
-            push(min.x, y, z);
-            push(max.x, y, z);
-        }
+    for (let x = min.x; x <= max.x; x += step) {
+        push(x, min.z);
+        push(x, max.z);
     }
-    for (let y = min.y; y <= max.y; y += step) {
-        push(min.x, y, min.z);
-        push(max.x, y, min.z);
-        push(min.x, y, max.z);
-        push(max.x, y, max.z);
+    for (let z = min.z + step; z <= max.z - step; z += step) {
+        push(min.x, z);
+        push(max.x, z);
     }
+    
     return points;
 }
 
