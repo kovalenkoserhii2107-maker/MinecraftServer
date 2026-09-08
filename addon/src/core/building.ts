@@ -174,11 +174,12 @@ export function saveFromSelection(
     }
 
     const min = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), z: Math.min(a.z, b.z) };
-    const max = { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y), z: Math.max(a.z, b.z) };
+    const maxY = Math.min(319, min.y + 127);
+    const max = { x: Math.max(a.x, b.x), y: maxY, z: Math.max(a.z, b.z) };
     const size = { x: max.x - min.x + 1, y: max.y - min.y + 1, z: max.z - min.z + 1 };
 
-    if (size.x > config.maxSize || size.y > config.maxSize || size.z > config.maxSize) {
-        return { ok: false, message: `Сторона области не должна превышать ${config.maxSize} блоков.` };
+    if (size.x > config.maxSize || size.z > config.maxSize) {
+        return { ok: false, message: `Сторона области не должна превышать ${config.maxSize} блоков (высота берётся автоматически).` };
     }
 
     const id = slugify(trimmed);

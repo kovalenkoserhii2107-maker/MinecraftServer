@@ -208,8 +208,8 @@ check('модальная форма спрашивает название и с
 check('чертёж сохранён со снятой структурой', () => {
     const structure = world.structureManager.get('mc:bp_домик');
     assert.ok(structure, 'структура не снята');
-    assert.deepEqual(structure.size, { x: 5, y: 4, z: 4 });
-    assert.ok(alice.messages.some((m) => m.includes('5×4×4')), 'нет подтверждения габарита');
+    assert.deepEqual(structure.size, { x: 5, y: 128, z: 4 });
+    assert.ok(alice.messages.some((m) => m.includes('5×128×4')), 'нет подтверждения габарита');
 });
 check('разметка углов сброшена после сохранения', () => {
     assert.equal(alice.getDynamicProperty('mc:bp_corner_a'), undefined);
@@ -297,7 +297,7 @@ await openPanel(alice, [1, 0, 0, 0]);
 check('подтверждение показывает габарит и вердикт по участку', () => {
     const confirm = __shown.find((f) => f.title === 'Подтверждение');
     assert.ok(confirm, 'подтверждение не открылось');
-    assert.ok(confirm.body.includes('5×4×4'), confirm.body);
+    assert.ok(confirm.body.includes('5×128×4'), confirm.body);
     assert.ok(confirm.body.includes('Место подходит'), confirm.body);
 });
 

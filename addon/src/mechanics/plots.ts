@@ -119,8 +119,8 @@ export const plotsMechanic = defineMechanic({
                         const isMine = owner.id === player.id;
                         const particle = isMine ? 'minecraft:villager_happy' : 'minecraft:basic_flame_particle';
                         
-                        // Шаг 2 блока для оптимизации (8 частиц на сторону)
-                        const points = chunkOutline(ref, y, 2);
+                        // Шаг 0.5 блока для сплошной линии свечения (32 частицы на сторону)
+                        const points = chunkOutline(ref, y, 0.5);
                         for (const point of points) {
                             try {
                                 player.spawnParticle(particle, point);
