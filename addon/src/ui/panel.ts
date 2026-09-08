@@ -1,214 +1,508 @@
-import { CommandPermissionLevel, Player, system } from '@minecraft/server';
-import { ActionFormData, FormCancelationReason } from '@minecraft/server-ui';
-import { Color, formatCoords, formatDimension, formatMinutes } from '../core/format.js';
+import { CommandPermissionLevel, system, type Player } from '@minecraft/server';
+import { ActionFormData, ModalFormData } from '@minecraft/server-ui';
+import { listBlueprints } from '../core/blueprints.js';
+import {
+    boxAt,
+    checkPlot,
+    corners,
+    placeBlueprint,
+    removeBlueprint,
+    saveFromSelection,
+    selectBlueprint,
+    targetOrigin,
+} from '../core/building.js';
 import { formatMoney, getBalance } from '../core/economy.js';
-import { chunkAt, chunkBounds, getOwner, listOwnedChunks } from '../core/plots.js';
+import { Color, formatCoords, formatDimension, formatMinutes } from '../core/format.js';
 import { ensureMarked } from '../core/markedItem.js';
-import { blueprintItemSpec } from '../mechanics/blueprints.js';
-import { renderPlotMap } from '../mechanics/plots.js';
-import type { Logger } from '../core/logger.js';
+import { giveStarterKit, returnToDeath } from '../core/playerActions.js';
+import {
+    chunkAt,
+    chunkBounds,
+    claimPlot,
+    getOwner,
+    listOwnedChunks,
+    renderPlotMap,
+    unclaimPlot,
+} from '../core/plots.js';
 import type { EngineRuntime } from '../core/runtime.js';
 import { readNumber, readString, readVector } from '../core/storage.js';
+import { showAction, showModal } from './forms.js';
 
 /**
- * Панель сервера — единая точка управления для всех механик.
+ * Панель коммуникатора — единственный способ управлять сервером.
  *
- * Открывается двумя способами: предметом-коммуникатором (механика `device`)
- * и командой `/mc:panel`. Оба ведут сюда, поэтому меню описано один раз.
- *
- * Форма листается стиками и крестовиной, поэтому годится и для консолей,
- * где набирать команды с геймпада неудобно.
+ * Чат-команд у движка нет: набирать их с геймпада неудобно, а на консолях это
+ * основная платформа. Всё управление собрано здесь и разложено по категориям.
  */
 
-/**
- * Клиент отвечает `UserBusy`, пока у игрока открыт другой интерфейс — а после
- * ввода слэш-команды чат ещё закрывается. Ждём освобождения UI, но не вечно.
- */
-const BUSY_RETRY_ATTEMPTS = 10;
-const BUSY_RETRY_TICKS = 10;
-
-async function showWhenReady(form: ActionFormData, player: Player, log: Logger) {
-    for (let attempt = 0; attempt < BUSY_RETRY_ATTEMPTS; attempt++) {
-        if (!player.isValid) return undefined;
-        const response = await form.show(player);
-        if (response.cancelationReason !== FormCancelationReason.UserBusy) {
-            return response;
-        }
-        await system.waitTicks(BUSY_RETRY_TICKS);
-    }
-    log.warn(`Не удалось открыть панель для ${player.name}: интерфейс занят.`);
-    return undefined;
+function isAdmin(player: Player): boolean {
+    return player.commandPermissionLevel >= CommandPermissionLevel.Admin;
 }
 
-function playerSummary(player: Player): string {
-    const minutes = readNumber(player, 'mc:playtime_minutes', 0);
-    const deaths = readNumber(player, 'mc:death_count', 0);
-    const joins = readNumber(player, 'mc:join_count', 0);
-    const deathPos = readVector(player, 'mc:death_pos');
-    const deathDim = readString(player, 'mc:death_dim', '');
-
-    const lines = [
-        `${Color.gray}Игрок: ${Color.yellow}${player.name}${Color.reset}`,
-        `${Color.gray}Баланс: ${Color.gold}${formatMoney(getBalance(player))}${Color.reset}`,
-        `${Color.gray}В игре: ${Color.yellow}${formatMinutes(minutes)}${Color.reset}`,
-        `${Color.gray}Входов: ${Color.yellow}${joins}${Color.gray}, смертей: ${Color.yellow}${deaths}${Color.reset}`,
-    ];
-    if (deathPos && deathDim !== '') {
-        lines.push(
-            `${Color.gray}Точка смерти: ${Color.yellow}${formatCoords(deathPos)}${Color.gray} (${formatDimension(deathDim)})${Color.reset}`,
-        );
-    }
-    return lines.join('\n');
+/** Мутации мира нельзя выполнять внутри обработчика формы — откладываем на тик. */
+function apply(action: () => void): void {
+    system.run(action);
 }
 
-async function showMechanicsMenu(player: Player, runtime: EngineRuntime): Promise<void> {
-    const entries = runtime.registry.status();
-    const form = new ActionFormData()
-        .title('Механики сервера')
-        .body(`${Color.gray}Выберите механику, чтобы переключить её состояние.${Color.reset}`);
+// ---------------------------------------------------------------- главное меню
 
-    for (const entry of entries) {
-        const state = entry.active ? `${Color.green}вкл` : `${Color.red}выкл`;
-        form.button(`${entry.id}\n${state}${Color.reset}`);
-    }
-    form.button(`${Color.gray}Назад${Color.reset}`);
-
-    const response = await showWhenReady(form, player, runtime.log);
-    if (!response || response.canceled || response.selection === undefined) return;
-
-    const selected = entries[response.selection];
-    if (!selected) {
-        await showMainMenu(player, runtime);
-        return;
-    }
-
-    // Активация подписывается на события — это мутация, откладываем на тик.
-    system.run(() => {
-        runtime.registry.setEnabled(selected.id, !selected.active);
+export function openPanel(player: Player, runtime: EngineRuntime): void {
+    void showMainMenu(player, runtime).catch((error: unknown) => {
+        runtime.log.error('Ошибка панели сервера:', error);
     });
-    player.sendMessage(
-        `${Color.gray}Механика ${Color.yellow}${selected.id}${Color.gray} теперь ` +
-            `${selected.active ? `${Color.red}выключена` : `${Color.green}включена`}${Color.reset}`,
-    );
-    await showMechanicsMenu(player, runtime);
 }
 
-
-/** Карта вокруг игрока и список его владений. */
-async function showPlotsMenu(player: Player, runtime: EngineRuntime): Promise<void> {
-    const config = runtime.config.plots;
+async function showMainMenu(player: Player, runtime: EngineRuntime): Promise<void> {
     const symbol = runtime.config.economy.currencySymbol;
-    const here = chunkAt(player.dimension.id, player.location.x, player.location.z);
-    const owner = getOwner(here);
-    const owned = listOwnedChunks(player.id);
-    const bounds = chunkBounds(here);
+    const owned = listOwnedChunks(player.id).length;
 
     const body = [
-        renderPlotMap(player, config.mapRadius),
-        '',
-        `${Color.green}█${Color.gray} ваше   ${Color.red}█${Color.gray} чужое   ${Color.darkGray}░${Color.gray} свободно   ${Color.yellow}▣${Color.gray} вы здесь${Color.reset}`,
-        '',
-        owner
-            ? `${Color.gray}Здесь: ${owner.id === player.id ? `${Color.green}ваш участок` : `${Color.red}${owner.name}`}${Color.reset}`
-            : `${Color.gray}Здесь: ${Color.yellow}земля свободна${Color.reset}`,
-        `${Color.gray}Границы чанка: ${bounds.minX}..${bounds.maxX} X, ${bounds.minZ}..${bounds.maxZ} Z${Color.reset}`,
-        `${Color.gray}Ваших чанков: ${Color.yellow}${owned.length}${Color.reset}`,
+        `${Color.gray}Игрок: ${Color.yellow}${player.name}${Color.reset}`,
+        `${Color.gray}Баланс: ${Color.gold}${formatMoney(getBalance(player), symbol)}${Color.reset}`,
+        `${Color.gray}Участков (чанков): ${Color.yellow}${owned}${Color.reset}`,
     ].join('\n');
 
     const form = new ActionFormData()
-        .title('Участки')
+        .title('Коммуникатор')
         .body(body)
-        .button(`${Color.yellow}Купить 16×16${Color.gray}\n${formatMoney(config.cost16, symbol)}${Color.reset}`)
-        .button(`${Color.yellow}Купить 32×32${Color.gray}\n${formatMoney(config.cost32, symbol)}${Color.reset}`)
-        .button(`${Color.aqua}Обновить карту${Color.reset}`)
-        .button(`${Color.gray}Назад${Color.reset}`);
+        .button(`${Color.green}Территории${Color.gray}\nучастки и карта${Color.reset}`)
+        .button(`${Color.aqua}Строительство${Color.gray}\nчертежи и здания${Color.reset}`)
+        .button(`${Color.yellow}Игрок${Color.gray}\nстатистика и набор${Color.reset}`)
+        .button(`${Color.lightPurple}Система${Color.gray}\nмодули движка${Color.reset}`)
+        .button(`${Color.gray}Закрыть${Color.reset}`);
 
-    const response = await showWhenReady(form, player, runtime.log);
+    const response = await showAction(form, player, runtime.log);
     if (!response || response.canceled || response.selection === undefined) return;
 
     switch (response.selection) {
         case 0:
+            await showTerritories(player, runtime);
+            return;
         case 1:
-            // Покупка меняет мир, поэтому идёт отдельным тиком, а результат
-            // приходит сообщением в чат — форму заново не открываем.
-            player.sendMessage(
-                `${Color.gray}Наберите ${Color.yellow}/mc:claim ${response.selection === 0 ? '16x16' : '32x32'}${Color.gray}, чтобы подтвердить покупку.${Color.reset}`,
-            );
+            await showBuilding(player, runtime);
             return;
         case 2:
-            await showPlotsMenu(player, runtime);
+            await showPlayerMenu(player, runtime);
+            return;
+        case 3:
+            await showSystem(player, runtime);
+            return;
+        default:
+            return;
+    }
+}
+
+// ------------------------------------------------------------------ территории
+
+async function showTerritories(player: Player, runtime: EngineRuntime): Promise<void> {
+    const config = runtime.config.plots;
+    const symbol = runtime.config.economy.currencySymbol;
+    const here = chunkAt(player.dimension.id, player.location.x, player.location.z);
+    const owner = getOwner(here);
+
+    const body = [
+        renderPlotMap(player, config.mapRadius),
+        '',
+        `${Color.green}█${Color.gray} ваше  ${Color.red}█${Color.gray} чужое  ` +
+            `${Color.darkGray}░${Color.gray} свободно  ${Color.yellow}▣${Color.gray} вы здесь${Color.reset}`,
+    ].join('\n');
+
+    const form = new ActionFormData()
+        .title('Территории')
+        .body(body)
+        .button(`${Color.yellow}Информация об участке${Color.reset}`)
+        .button(`${Color.green}Купить 16×16${Color.gray}\n${formatMoney(config.cost16, symbol)}${Color.reset}`)
+        .button(`${Color.green}Купить 32×32${Color.gray}\n${formatMoney(config.cost32, symbol)}${Color.reset}`);
+
+    const isMine = owner?.id === player.id;
+    if (isMine) {
+        const refund = Math.floor(config.cost16 * config.refundRatio);
+        form.button(`${Color.red}Продать участок${Color.gray}\n+${formatMoney(refund, symbol)}${Color.reset}`);
+    }
+    form.button(`${Color.gray}Назад${Color.reset}`);
+
+    const response = await showAction(form, player, runtime.log);
+    if (!response || response.canceled || response.selection === undefined) return;
+
+    switch (response.selection) {
+        case 0:
+            await showPlotInfo(player, runtime);
+            return;
+        case 1:
+        case 2: {
+            const size = response.selection === 1 ? 16 : 32;
+            apply(() => {
+                if (!player.isValid) return;
+                const result = claimPlot(player, size, config, symbol);
+                player.sendMessage(
+                    result.ok ? `${Color.green}${result.message}` : `${Color.red}${result.message}`,
+                );
+            });
+            return;
+        }
+        case 3:
+            if (isMine) {
+                apply(() => {
+                    if (!player.isValid) return;
+                    const result = unclaimPlot(player, config, symbol);
+                    player.sendMessage(
+                        result.ok ? `${Color.green}${result.message}` : `${Color.red}${result.message}`,
+                    );
+                });
+                return;
+            }
+            await showMainMenu(player, runtime);
             return;
         default:
             await showMainMenu(player, runtime);
     }
 }
 
-async function showMainMenu(player: Player, runtime: EngineRuntime): Promise<void> {
-    const isAdmin = player.commandPermissionLevel >= CommandPermissionLevel.Admin;
+async function showPlotInfo(player: Player, runtime: EngineRuntime): Promise<void> {
+    const here = chunkAt(player.dimension.id, player.location.x, player.location.z);
+    const owner = getOwner(here);
+    const bounds = chunkBounds(here);
+    const owned = listOwnedChunks(player.id);
+
+    const status = !owner
+        ? `${Color.yellow}свободен — можно купить${Color.reset}`
+        : owner.id === player.id
+          ? `${Color.green}ваш${Color.reset}`
+          : `${Color.red}занят: ${owner.name}${Color.reset}`;
+
+    const body = [
+        `${Color.gray}Статус: ${status}`,
+        `${Color.gray}Измерение: ${formatDimension(player.dimension.id)}${Color.reset}`,
+        `${Color.gray}Чанк: ${here.cx}, ${here.cz}${Color.reset}`,
+        `${Color.gray}Границы: ${bounds.minX}..${bounds.maxX} по X${Color.reset}`,
+        `${Color.gray}         ${bounds.minZ}..${bounds.maxZ} по Z${Color.reset}`,
+        '',
+        `${Color.gray}Всего ваших чанков: ${Color.yellow}${owned.length}${Color.reset}`,
+    ].join('\n');
 
     const form = new ActionFormData()
-        .title('Панель сервера')
-        .body(playerSummary(player))
-        .button(`${Color.yellow}Список команд${Color.reset}`)
-        .button(`${Color.green}Участки и карта${Color.reset}`)
-        .button(`${Color.aqua}Получить чертёж${Color.reset}`);
+        .title('Информация об участке')
+        .body(body)
+        .button(`${Color.gray}Назад${Color.reset}`);
 
-    if (isAdmin) {
-        form.button(`${Color.aqua}Механики${Color.reset}`);
+    await showAction(form, player, runtime.log);
+    await showTerritories(player, runtime);
+}
+
+// --------------------------------------------------------------- строительство
+
+async function showBuilding(player: Player, runtime: EngineRuntime): Promise<void> {
+    const config = runtime.config.blueprints;
+    const { a, b } = corners(player);
+    const marked = a && b ? 'оба угла отмечены' : a ? 'отмечен угол A' : 'углы не отмечены';
+
+    const form = new ActionFormData()
+        .title('Строительство')
+        .body(
+            `${Color.gray}Возьмите чертёж в руку и смотрите на место — контур покажет габарит.\n` +
+                `Разметка области: ${Color.yellow}${marked}${Color.reset}`,
+        )
+        .button(`${Color.aqua}Каталог зданий${Color.reset}`)
+        .button(`${Color.yellow}Получить чертёж${Color.reset}`);
+
+    if (isAdmin(player)) {
+        form.button(`${Color.green}Сохранить чертёж${Color.gray}\nиз отмеченной области${Color.reset}`);
+        form.button(`${Color.red}Удалить чертёж${Color.reset}`);
     }
-    form.button(`${Color.gray}Закрыть${Color.reset}`);
+    form.button(`${Color.gray}Назад${Color.reset}`);
 
-    const response = await showWhenReady(form, player, runtime.log);
+    const response = await showAction(form, player, runtime.log);
     if (!response || response.canceled || response.selection === undefined) return;
 
-    if (response.selection === 0) {
-        player.sendMessage(
-            `${Color.aqua}Команды:${Color.reset}\n` +
-                `${Color.yellow}/mc:panel${Color.gray} — эта панель\n` +
-                `${Color.yellow}/mc:device${Color.gray} — получить коммуникатор\n` +
-                `${Color.yellow}/mc:balance${Color.gray} — баланс криптогривны\n` +
-                `${Color.yellow}/mc:blueprint${Color.gray} — получить чертёж\n` +
-                `${Color.yellow}/mc:bplist${Color.gray} — список типовых зданий\n` +
-                `${Color.yellow}/mc:claim${Color.gray} — купить участок 16x16 или 32x32\n` +
-                `${Color.yellow}/mc:plotinfo${Color.gray} — чей участок под вами\n` +
-                `${Color.yellow}/mc:unclaim${Color.gray} — продать участок\n` +
-                `${Color.yellow}/mc:stats${Color.gray} — ваша статистика\n` +
-                `${Color.yellow}/mc:kit${Color.gray} — стартовый набор\n` +
-                `${Color.yellow}/mc:deathpoint${Color.gray} — координаты смерти\n` +
-                `${Color.yellow}/mc:back${Color.gray} — возврат к месту смерти${Color.reset}`,
-        );
-        return;
-    }
-    if (response.selection === 1) {
-        await showPlotsMenu(player, runtime);
-        return;
-    }
-    if (response.selection === 2) {
-        // Выдача предмета — мутация мира, поэтому отдельным тиком.
-        system.run(() => {
-            if (!player.isValid) return;
-            if (ensureMarked(player, blueprintItemSpec(runtime.config.blueprints))) {
+    switch (response.selection) {
+        case 0:
+            await showCatalog(player, runtime);
+            return;
+        case 1:
+            apply(() => {
+                if (!player.isValid) return;
+                const spec = {
+                    key: 'mc:blueprint',
+                    itemType: config.itemType,
+                    itemName: config.itemName,
+                    lore: config.lore,
+                    // Чертёж можно класть в сундук — в отличие от коммуникатора.
+                    lockInInventory: false,
+                };
                 player.sendMessage(
-                    `${Color.green}Чертёж выдан. Возьмите его в руку и смотрите на место постройки.${Color.reset}`,
+                    ensureMarked(player, spec)
+                        ? `${Color.green}Чертёж выдан.${Color.reset}`
+                        : `${Color.red}Освободите слот в инвентаре.${Color.reset}`,
                 );
-            } else {
-                player.sendMessage(`${Color.red}Освободите слот в инвентаре.${Color.reset}`);
+            });
+            return;
+        case 2:
+            if (isAdmin(player)) {
+                await showSaveBlueprint(player, runtime);
+                return;
             }
-        });
-        return;
-    }
-    if (isAdmin && response.selection === 3) {
-        await showMechanicsMenu(player, runtime);
+            await showMainMenu(player, runtime);
+            return;
+        case 3:
+            if (isAdmin(player)) {
+                await showDeleteBlueprint(player, runtime);
+                return;
+            }
+            await showMainMenu(player, runtime);
+            return;
+        default:
+            await showMainMenu(player, runtime);
     }
 }
 
-/**
- * Открывает панель. Безопасно вызывать из обработчика события или команды:
- * показ формы сам по себе мутацией не является, но вызывающий обязан быть
- * вне read-only режима — см. `defer()` в `core/commands.ts`.
- */
-export function openPanel(player: Player, runtime: EngineRuntime): void {
-    void showMainMenu(player, runtime).catch((error: unknown) => {
-        runtime.log.error('Ошибка панели сервера:', error);
+/** Каталог: выбор здания активирует голограмму и открывает подтверждение. */
+export async function showCatalog(player: Player, runtime: EngineRuntime): Promise<void> {
+    const config = runtime.config.blueprints;
+    const symbol = runtime.config.economy.currencySymbol;
+    const blueprints = listBlueprints();
+
+    if (blueprints.length === 0) {
+        const empty = new ActionFormData()
+            .title('Каталог зданий')
+            .body(
+                `${Color.gray}Чертежей пока нет.\n\nОператор создаёт их так: построить здание, ` +
+                    `отметить два угла приседом с чертежом, затем «Строительство → Сохранить чертёж».${Color.reset}`,
+            )
+            .button(`${Color.gray}Назад${Color.reset}`);
+        await showAction(empty, player, runtime.log);
+        return;
+    }
+
+    const form = new ActionFormData()
+        .title('Каталог зданий')
+        .body(`${Color.gray}Выбор здания включает контур габарита на месте, куда вы смотрите.${Color.reset}`);
+    for (const blueprint of blueprints) {
+        form.button(
+            `${blueprint.name}\n${Color.gray}${blueprint.sizeX}×${blueprint.sizeY}×${blueprint.sizeZ} — ` +
+                `${formatMoney(blueprint.price, symbol)}${Color.reset}`,
+        );
+    }
+    form.button(`${Color.gray}Назад${Color.reset}`);
+
+    const response = await showAction(form, player, runtime.log);
+    if (!response || response.canceled || response.selection === undefined) return;
+
+    const blueprint = blueprints[response.selection];
+    if (!blueprint) return;
+
+    // Выбор сохраняем сразу: голограмма должна работать ещё до покупки.
+    selectBlueprint(player, blueprint);
+
+    const origin = targetOrigin(player, config.raycastDistance);
+    if (!origin) {
+        player.sendMessage(
+            `${Color.gray}Выбран «${blueprint.name}». Наведитесь на место постройки — появится контур.${Color.reset}`,
+        );
+        return;
+    }
+
+    const plot = checkPlot(player, boxAt(origin, blueprint), config);
+    const affordable = getBalance(player) >= blueprint.price;
+    const canBuild = plot.allowed && affordable;
+
+    const confirm = new ActionFormData()
+        .title('Подтверждение')
+        .body(
+            [
+                `${Color.gray}Здание: ${Color.yellow}${blueprint.name}${Color.reset}`,
+                `${Color.gray}Габарит: ${blueprint.sizeX}×${blueprint.sizeY}×${blueprint.sizeZ}${Color.reset}`,
+                `${Color.gray}Угол: ${origin.x}, ${origin.y}, ${origin.z}${Color.reset}`,
+                `${Color.gray}Стоимость: ${Color.gold}${formatMoney(blueprint.price, symbol)}${Color.reset}`,
+                '',
+                plot.allowed
+                    ? `${Color.green}Место подходит${Color.reset}`
+                    : `${Color.red}${plot.reason}${Color.reset}`,
+                affordable
+                    ? `${Color.green}Средств достаточно${Color.reset}`
+                    : `${Color.red}Не хватает средств${Color.reset}`,
+            ].join('\n'),
+        )
+        .button(canBuild ? `${Color.green}Построить${Color.reset}` : `${Color.darkGray}Построить нельзя${Color.reset}`)
+        .button(`${Color.gray}Отмена${Color.reset}`);
+
+    const decision = await showAction(confirm, player, runtime.log);
+    if (!decision || decision.canceled || decision.selection !== 0 || !canBuild) return;
+
+    apply(() => {
+        if (!player.isValid) return;
+        const result = placeBlueprint(player, blueprint, origin, config, symbol);
+        player.sendMessage(result.ok ? `${Color.green}${result.message}` : `${Color.red}${result.message}`);
+        if (result.ok) {
+            runtime.log.info(`${player.name} построил «${blueprint.name}» в ${origin.x},${origin.y},${origin.z}.`);
+        }
     });
+}
+
+/** Сохранение чертежа: название и цена вводятся в модальной форме. */
+async function showSaveBlueprint(player: Player, runtime: EngineRuntime): Promise<void> {
+    const config = runtime.config.blueprints;
+    const { a, b } = corners(player);
+
+    if (!a || !b) {
+        const hint = new ActionFormData()
+            .title('Сохранить чертёж')
+            .body(
+                `${Color.red}Область не размечена.${Color.reset}\n\n` +
+                    `${Color.gray}Возьмите чертёж, присядьте и используйте предмет по двум ` +
+                    `противоположным углам постройки, затем вернитесь сюда.${Color.reset}`,
+            )
+            .button(`${Color.gray}Назад${Color.reset}`);
+        await showAction(hint, player, runtime.log);
+        await showBuilding(player, runtime);
+        return;
+    }
+
+    const size = {
+        x: Math.abs(a.x - b.x) + 1,
+        y: Math.abs(a.y - b.y) + 1,
+        z: Math.abs(a.z - b.z) + 1,
+    };
+
+    // Без .label(): декоративные элементы могут занимать позицию в formValues,
+    // и индексы полей поехали бы. Габарит выносим в заголовок.
+    const form = new ModalFormData()
+        .title(`Чертёж ${size.x}×${size.y}×${size.z}`)
+        .textField('Название постройки', 'Например: Домик')
+        .textField('Стоимость', '3000', { defaultValue: '0' })
+        .submitButton('Сохранить');
+
+    const response = await showModal(form, player, runtime.log);
+    if (!response || response.canceled || !response.formValues) return;
+
+    const name = String(response.formValues[0] ?? '');
+    const price = Number(String(response.formValues[1] ?? '').replace(/\s/g, ''));
+
+    apply(() => {
+        if (!player.isValid) return;
+        const result = saveFromSelection(player, name, price, config);
+        player.sendMessage(result.ok ? `${Color.green}${result.message}` : `${Color.red}${result.message}`);
+        if (!result.ok) runtime.log.warn(`Сохранение чертежа не удалось: ${result.message}`);
+    });
+}
+
+async function showDeleteBlueprint(player: Player, runtime: EngineRuntime): Promise<void> {
+    const blueprints = listBlueprints();
+    if (blueprints.length === 0) {
+        player.sendMessage(`${Color.gray}Удалять нечего — чертежей нет.${Color.reset}`);
+        return;
+    }
+
+    const form = new ActionFormData().title('Удалить чертёж').body(`${Color.gray}Действие необратимо.${Color.reset}`);
+    for (const blueprint of blueprints) form.button(`${Color.red}${blueprint.name}${Color.reset}`);
+    form.button(`${Color.gray}Назад${Color.reset}`);
+
+    const response = await showAction(form, player, runtime.log);
+    if (!response || response.canceled || response.selection === undefined) return;
+
+    const blueprint = blueprints[response.selection];
+    if (!blueprint) {
+        await showBuilding(player, runtime);
+        return;
+    }
+
+    apply(() => {
+        removeBlueprint(blueprint);
+        player.sendMessage(`${Color.green}Чертёж «${blueprint.name}» удалён.${Color.reset}`);
+    });
+}
+
+// ----------------------------------------------------------------------- игрок
+
+async function showPlayerMenu(player: Player, runtime: EngineRuntime): Promise<void> {
+    const symbol = runtime.config.economy.currencySymbol;
+    const minutes = readNumber(player, 'mc:playtime_minutes', 0);
+    const deaths = readNumber(player, 'mc:death_count', 0);
+    const joins = readNumber(player, 'mc:join_count', 0);
+    const deathPos = readVector(player, 'mc:death_pos');
+    const deathDim = readString(player, 'mc:death_dim', '');
+    const returnsLeft = readNumber(player, 'mc:death_returns_left', 0);
+
+    const lines = [
+        `${Color.gray}Баланс: ${Color.gold}${formatMoney(getBalance(player), symbol)}${Color.reset}`,
+        `${Color.gray}В игре: ${Color.yellow}${formatMinutes(minutes)}${Color.reset}`,
+        `${Color.gray}Входов: ${Color.yellow}${joins}${Color.gray}, смертей: ${Color.yellow}${deaths}${Color.reset}`,
+    ];
+    if (deathPos && deathDim !== '') {
+        lines.push(
+            `${Color.gray}Точка смерти: ${Color.yellow}${formatCoords(deathPos)}${Color.gray} ` +
+                `(${formatDimension(deathDim)}), возвратов: ${returnsLeft}${Color.reset}`,
+        );
+    }
+
+    const form = new ActionFormData().title('Игрок').body(lines.join('\n'));
+    const canReturn = deathPos !== undefined && returnsLeft > 0;
+    form.button(
+        canReturn
+            ? `${Color.aqua}Вернуться к месту смерти${Color.reset}`
+            : `${Color.darkGray}Возврат недоступен${Color.reset}`,
+    );
+    form.button(`${Color.yellow}Стартовый набор${Color.reset}`);
+    form.button(`${Color.gray}Назад${Color.reset}`);
+
+    const response = await showAction(form, player, runtime.log);
+    if (!response || response.canceled || response.selection === undefined) return;
+
+    if (response.selection === 0 && canReturn) {
+        apply(() => {
+            if (!player.isValid) return;
+            const result = returnToDeath(player, runtime.config.deathBeacon);
+            player.sendMessage(result.ok ? `${Color.green}${result.message}` : `${Color.red}${result.message}`);
+        });
+        return;
+    }
+    if (response.selection === 1) {
+        apply(() => {
+            if (!player.isValid) return;
+            const result = giveStarterKit(player, runtime.config.welcome);
+            player.sendMessage(result.ok ? `${Color.green}${result.message}` : `${Color.red}${result.message}`);
+        });
+        return;
+    }
+    await showMainMenu(player, runtime);
+}
+
+// --------------------------------------------------------------------- система
+
+async function showSystem(player: Player, runtime: EngineRuntime): Promise<void> {
+    const entries = runtime.registry.status();
+    const admin = isAdmin(player);
+
+    const body = [
+        `${Color.gray}Активных модулей: ${Color.yellow}${entries.filter((e) => e.active).length}` +
+            `${Color.gray} из ${entries.length}${Color.reset}`,
+        '',
+        admin
+            ? `${Color.gray}Выберите модуль, чтобы переключить его состояние.${Color.reset}`
+            : `${Color.gray}Переключение доступно операторам.${Color.reset}`,
+    ].join('\n');
+
+    const form = new ActionFormData().title('Система').body(body);
+    for (const entry of entries) {
+        const state = entry.active ? `${Color.green}вкл` : `${Color.red}выкл`;
+        form.button(`${entry.id}  ${state}${Color.gray}\n${entry.description}${Color.reset}`);
+    }
+    form.button(`${Color.gray}Назад${Color.reset}`);
+
+    const response = await showAction(form, player, runtime.log);
+    if (!response || response.canceled || response.selection === undefined) return;
+
+    const selected = entries[response.selection];
+    if (!selected || !admin) {
+        await showMainMenu(player, runtime);
+        return;
+    }
+
+    apply(() => {
+        runtime.registry.setEnabled(selected.id, !selected.active);
+        player.sendMessage(
+            `${Color.gray}Модуль ${Color.yellow}${selected.id}${Color.gray} теперь ` +
+                `${selected.active ? `${Color.red}выключен` : `${Color.green}включён`}${Color.reset}`,
+        );
+    });
+    await showSystem(player, runtime);
 }

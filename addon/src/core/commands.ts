@@ -1,6 +1,4 @@
 import {
-    CommandPermissionLevel,
-    CustomCommandParamType,
     CustomCommandStatus,
     Player,
     system,
@@ -9,17 +7,20 @@ import {
     type CustomCommandRegistry,
     type CustomCommandResult,
 } from '@minecraft/server';
-import { Color } from './format.js';
 import { guard } from './lifecycle.js';
 import type { Logger } from './logger.js';
 import type { Mechanic } from './mechanic.js';
 import { getRuntime } from './runtime.js';
 
-/** Пространство имён всех команд движка: `/mc:help`, `/mc:back`, ... */
+/**
+ * Пространство имён команд движка.
+ *
+ * Управление сервером живёт в панели коммуникатора: набирать команды с
+ * геймпада неудобно, а консоли — основная платформа. В чате осталась ровно
+ * одна команда — `/mc:device`, страховка на случай, если коммуникатор потерян
+ * и панель открыть нечем.
+ */
 export const COMMAND_NAMESPACE = 'mc';
-
-/** Имя enum-параметра со списком идентификаторов механик. */
-const MECHANIC_ENUM = `${COMMAND_NAMESPACE}:mechanic_id`;
 
 /**
  * Описание команды, принадлежащей механике.
@@ -75,15 +76,6 @@ export function registerCommands(
     mechanics: readonly Mechanic[],
     log: Logger,
 ): void {
-    const ids = mechanics.map((mechanic) => mechanic.id);
-    if (ids.length > 0) {
-        registry.registerEnum(MECHANIC_ENUM, ids);
-    }
-
-    for (const command of coreCommands(mechanics)) {
-        register(registry, command, log);
-    }
-
     for (const mechanic of mechanics) {
         for (const command of mechanic.commands ?? []) {
             for (const [name, values] of Object.entries(command.enums ?? {})) {
@@ -127,75 +119,3 @@ function register(
     }
 }
 
-function coreCommands(mechanics: readonly Mechanic[]): MechanicCommand[] {
-    return [
-        {
-            definition: {
-                name: `${COMMAND_NAMESPACE}:help`,
-                description: 'Список кастомных команд сервера.',
-                permissionLevel: CommandPermissionLevel.Any,
-                cheatsRequired: false,
-            },
-            handler: () => {
-                const lines = [`${Color.aqua}Команды сервера:${Color.reset}`];
-                for (const mechanic of mechanics) {
-                    for (const command of mechanic.commands ?? []) {
-                        lines.push(
-                            `${Color.yellow}/${command.definition.name}${Color.gray} — ${command.definition.description}${Color.reset}`,
-                        );
-                    }
-                }
-                lines.push(
-                    `${Color.yellow}/${COMMAND_NAMESPACE}:mechanics${Color.gray} — состояние механик.${Color.reset}`,
-                );
-                return ok(lines.join('\n'));
-            },
-        },
-        {
-            definition: {
-                name: `${COMMAND_NAMESPACE}:mechanics`,
-                description: 'Показать зарегистрированные механики и их состояние.',
-                permissionLevel: CommandPermissionLevel.Any,
-                cheatsRequired: false,
-            },
-            handler: () => {
-                const runtime = getRuntime();
-                if (!runtime) return fail('Движок механик ещё не запущен.');
-                const lines = runtime.registry.status().map((entry) => {
-                    const state = entry.active ? `${Color.green}вкл` : `${Color.red}выкл`;
-                    return `${state}${Color.reset} ${Color.yellow}${entry.id}${Color.gray} — ${entry.description}${Color.reset}`;
-                });
-                return ok(lines.length > 0 ? lines.join('\n') : 'Механики не зарегистрированы.');
-            },
-        },
-        {
-            definition: {
-                name: `${COMMAND_NAMESPACE}:toggle`,
-                description: 'Включить или выключить механику (сохраняется между рестартами).',
-                permissionLevel: CommandPermissionLevel.Admin,
-                cheatsRequired: false,
-                mandatoryParameters: [
-                    { name: MECHANIC_ENUM, type: CustomCommandParamType.Enum },
-                    { name: 'enabled', type: CustomCommandParamType.Boolean },
-                ],
-            },
-            handler: (_origin, ...args) => {
-                const runtime = getRuntime();
-                if (!runtime) return fail('Движок механик ещё не запущен.');
-
-                const [id, enabled] = args;
-                if (typeof id !== 'string' || typeof enabled !== 'boolean') {
-                    return fail('Использование: /mc:toggle <механика> <true|false>');
-                }
-                if (!runtime.registry.has(id)) {
-                    return fail(`Неизвестная механика «${id}».`);
-                }
-                // Активация подписывается на события — это мутация, откладываем на тик.
-                defer(runtime.log, `toggle:${id}`, () => {
-                    runtime.registry.setEnabled(id, enabled);
-                });
-                return ok(`Механика «${id}» будет ${enabled ? 'включена' : 'выключена'}.`);
-            },
-        },
-    ];
-}

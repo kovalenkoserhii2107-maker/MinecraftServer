@@ -1,4 +1,7 @@
-import { world } from '@minecraft/server';
+import { world, type Player } from '@minecraft/server';
+import type { PlotsConfig } from '../config.js';
+import { canAfford, chargeFrom, formatMoney, payTo } from './economy.js';
+import { Color } from './format.js';
 import { clear, readString, write } from './storage.js';
 
 /**
@@ -165,4 +168,114 @@ export function chunkBounds(ref: ChunkRef): { minX: number; minZ: number; maxX: 
         maxX: ref.cx * 16 + 15,
         maxZ: ref.cz * 16 + 15,
     };
+}
+
+export interface PlotActionResult {
+    readonly ok: boolean;
+    readonly message: string;
+}
+
+/**
+ * Покупка участка под игроком.
+ *
+ * Деньги списываются до записи владельца, а при сорвавшейся записи возвращаются
+ * целиком: половина участка бесполезна.
+ */
+export function claimPlot(
+    player: Player,
+    size: 16 | 32,
+    config: PlotsConfig,
+    symbol: string,
+): PlotActionResult {
+    const here = chunkAt(player.dimension.id, player.location.x, player.location.z);
+    const chunks = chunksForSize(here, size);
+
+    const taken = firstTakenChunk(chunks);
+    if (taken) {
+        const owner = getOwner(taken);
+        return {
+            ok: false,
+            message:
+                owner?.id === player.id
+                    ? 'Этот участок уже ваш.'
+                    : `Участок уже принадлежит игроку ${owner?.name ?? '—'}.`,
+        };
+    }
+
+    if (config.maxChunksPerPlayer > 0) {
+        const owned = listOwnedChunks(player.id).length;
+        if (owned + chunks.length > config.maxChunksPerPlayer) {
+            return { ok: false, message: `Превышен лимит: не больше ${config.maxChunksPerPlayer} чанков.` };
+        }
+    }
+
+    const cost = size === 32 ? config.cost32 : config.cost16;
+    if (!canAfford(player, cost)) {
+        return { ok: false, message: `Не хватает средств: нужно ${formatMoney(cost, symbol)}.` };
+    }
+    if (!chargeFrom(player, cost)) {
+        return { ok: false, message: 'Не удалось списать средства.' };
+    }
+
+    const claimed: ChunkRef[] = [];
+    for (const chunk of chunks) {
+        if (setOwner(chunk, { id: player.id, name: player.name })) {
+            claimed.push(chunk);
+        } else {
+            for (const done of claimed) clearOwner(done);
+            payTo(player, cost);
+            return { ok: false, message: 'Хранилище мира отказало в записи, средства возвращены.' };
+        }
+    }
+
+    const bounds = chunkBounds(chunks[0]!);
+    const area = size === 32 ? '32×32' : '16×16';
+    return {
+        ok: true,
+        message:
+            `Участок ${area} куплен за ${formatMoney(cost, symbol)}. ` +
+            `Границы: ${bounds.minX}..${bounds.maxX} X, ${bounds.minZ}..${bounds.maxZ} Z.`,
+    };
+}
+
+/** Отказ от участка под игроком с частичным возвратом. */
+export function unclaimPlot(player: Player, config: PlotsConfig, symbol: string): PlotActionResult {
+    const here = chunkAt(player.dimension.id, player.location.x, player.location.z);
+    const owner = getOwner(here);
+    if (!owner) return { ok: false, message: 'Здесь нет участка.' };
+    if (owner.id !== player.id) return { ok: false, message: `Участок принадлежит игроку ${owner.name}.` };
+
+    const refund = Math.floor(config.cost16 * config.refundRatio);
+    clearOwner(here);
+    payTo(player, refund);
+    return { ok: true, message: `Участок продан. Возвращено ${formatMoney(refund, symbol)}.` };
+}
+
+/**
+ * Текстовая карта участков вокруг игрока.
+ * Символы одинаковой ширины, иначе сетка «поплывёт» в шрифте Minecraft.
+ */
+export function renderPlotMap(player: Player, radius: number): string {
+    const centerX = toChunk(player.location.x);
+    const centerZ = toChunk(player.location.z);
+    const dimensionId = player.dimension.id;
+    const rows: string[] = [];
+
+    for (let dz = -radius; dz <= radius; dz++) {
+        let row = '';
+        for (let dx = -radius; dx <= radius; dx++) {
+            const owner = getOwner({ dimensionId, cx: centerX + dx, cz: centerZ + dz });
+            if (dx === 0 && dz === 0) {
+                row += owner?.id === player.id ? `${Color.green}▣` : owner ? `${Color.red}▣` : `${Color.yellow}▣`;
+            } else if (!owner) {
+                row += `${Color.darkGray}░`;
+            } else if (owner.id === player.id) {
+                row += `${Color.green}█`;
+            } else {
+                row += `${Color.red}█`;
+            }
+        }
+        rows.push(row + Color.reset);
+    }
+    return rows.join('\n');
 }

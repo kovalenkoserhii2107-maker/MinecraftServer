@@ -1,5 +1,4 @@
 import type { Mechanic } from '../core/mechanic.js';
-import { adminPanelMechanic } from './adminPanel.js';
 import { blueprintsMechanic } from './blueprints.js';
 import { combatFeedbackMechanic } from './combatFeedback.js';
 import { deathBeaconMechanic } from './deathBeacon.js';
@@ -25,5 +24,4 @@ export const MECHANICS: readonly Mechanic[] = [
     deathBeaconMechanic,
     playtimeRewardsMechanic,
     combatFeedbackMechanic,
-    adminPanelMechanic,
 ];

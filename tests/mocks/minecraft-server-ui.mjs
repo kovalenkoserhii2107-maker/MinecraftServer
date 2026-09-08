@@ -10,7 +10,15 @@ export const __shown = [];
  */
 let __responses = [];
 export function __queueResponses(list) { __responses = [...list]; }
-export function __reset() { __shown.length = 0; __responses = []; }
+
+/**
+ * Очередь ответов на модальные формы: массив значений полей или undefined,
+ * если игрок закрыл форму.
+ */
+let __modalResponses = [];
+export function __queueModalResponses(list) { __modalResponses = [...list]; }
+
+export function __reset() { __shown.length = 0; __responses = []; __modalResponses = []; }
 
 export class ActionFormData {
   constructor(){ this.buttons = []; }
@@ -23,5 +31,26 @@ export class ActionFormData {
     return selection === undefined
       ? { canceled: true, cancelationReason: FormCancelationReason.UserClosed, selection: undefined }
       : { canceled: false, cancelationReason: undefined, selection };
+  }
+}
+
+/** Модальная форма: поля объявляются, значения приходят из очереди тестов. */
+export class ModalFormData {
+  constructor(){ this.fields = []; }
+  title(t){ this._title = t; return this; }
+  label(t){ this.fields.push({ kind: 'label', text: t }); return this; }
+  divider(){ this.fields.push({ kind: 'divider' }); return this; }
+  header(t){ this.fields.push({ kind: 'header', text: t }); return this; }
+  textField(label, placeholder, options){ this.fields.push({ kind: 'textField', label, placeholder, options }); return this; }
+  toggle(label, options){ this.fields.push({ kind: 'toggle', label, options }); return this; }
+  slider(label, min, max, options){ this.fields.push({ kind: 'slider', label, min, max, options }); return this; }
+  dropdown(label, items, options){ this.fields.push({ kind: 'dropdown', label, items, options }); return this; }
+  submitButton(text){ this._submit = text; return this; }
+  async show(player){
+    __shown.push({ player: player.name, title: this._title, modal: true, fields: [...this.fields] });
+    const values = __modalResponses.shift();
+    return values === undefined
+      ? { canceled: true, cancelationReason: FormCancelationReason.UserClosed, formValues: undefined }
+      : { canceled: false, cancelationReason: undefined, formValues: values };
   }
 }
