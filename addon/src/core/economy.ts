@@ -1,4 +1,10 @@
-import type { Player } from '@minecraft/server';
+import {
+    DisplaySlotId,
+    ObjectiveSortOrder,
+    world,
+    type Player,
+    type ScoreboardObjective,
+} from '@minecraft/server';
 import { readNumber, write } from './storage.js';
 
 /**
@@ -68,4 +74,66 @@ export function formatMoney(amount: number, symbol = '₴'): string {
         grouped += digits[i];
     }
     return `${grouped} ${symbol}`;
+}
+
+/**
+ * Табло баланса.
+ *
+ * Боковая панель — единственный способ держать постоянное число у правого края
+ * экрана без resource pack. Табло только зеркалит баланс: источником истины
+ * остаётся dynamic property игрока.
+ */
+export const BALANCE_OBJECTIVE = 'mc_balance';
+
+export function ensureObjective(title: string): ScoreboardObjective | undefined {
+    try {
+        return (
+            world.scoreboard.getObjective(BALANCE_OBJECTIVE) ??
+            world.scoreboard.addObjective(BALANCE_OBJECTIVE, title)
+        );
+    } catch {
+        return undefined;
+    }
+}
+
+export function showObjectiveOnSidebar(): void {
+    const objective = world.scoreboard.getObjective(BALANCE_OBJECTIVE);
+    if (!objective) return;
+    world.scoreboard.setObjectiveAtDisplaySlot(DisplaySlotId.Sidebar, {
+        objective,
+        sortOrder: ObjectiveSortOrder.Descending,
+    });
+}
+
+export function hideObjectiveFromSidebar(): void {
+    try {
+        world.scoreboard.clearObjectiveAtDisplaySlot(DisplaySlotId.Sidebar);
+    } catch {
+        // Мир уже выгружен — ничего страшного.
+    }
+}
+
+/** Переносит баланс игрока в счёт на табло. Вызывать после любого изменения. */
+export function refreshDisplay(player: Player): void {
+    try {
+        const objective = world.scoreboard.getObjective(BALANCE_OBJECTIVE);
+        if (!objective || !player.isValid) return;
+        objective.setScore(player, getBalance(player));
+    } catch {
+        // Табло может быть ещё не создано или игрок уже вышел.
+    }
+}
+
+/** Начисление с обновлением табло. */
+export function payTo(player: Player, amount: number): number {
+    const balance = deposit(player, amount);
+    refreshDisplay(player);
+    return balance;
+}
+
+/** Списание с обновлением табло. `false` — не хватило средств. */
+export function chargeFrom(player: Player, amount: number): boolean {
+    if (!withdraw(player, amount)) return false;
+    refreshDisplay(player);
+    return true;
 }

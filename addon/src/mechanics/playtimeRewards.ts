@@ -1,32 +1,10 @@
-import { CommandPermissionLevel, world } from '@minecraft/server';
+import { world } from '@minecraft/server';
 import { Color, formatMinutes } from '../core/format.js';
-import { fail, ok, playerFrom, type MechanicCommand } from '../core/commands.js';
 import { defineMechanic, type MechanicContext } from '../core/mechanic.js';
 import { increment, readNumber, write } from '../core/storage.js';
 
 const KEY_MINUTES = 'mc:playtime_minutes';
 const KEY_REWARD_INDEX = 'mc:playtime_reward_index';
-const KEY_DEATH_COUNT = 'mc:death_count';
-
-const statsCommand: MechanicCommand = {
-    definition: {
-        name: 'mc:stats',
-        description: 'Показать ваше время в игре и статистику.',
-        permissionLevel: CommandPermissionLevel.Any,
-        cheatsRequired: false,
-    },
-    handler: (origin) => {
-        const player = playerFrom(origin);
-        if (!player) return fail('Команда доступна только игроку.');
-
-        const minutes = readNumber(player, KEY_MINUTES, 0);
-        const deaths = readNumber(player, KEY_DEATH_COUNT, 0);
-        return ok(
-            `${Color.aqua}${player.name}${Color.gray} — в игре: ${Color.yellow}${formatMinutes(minutes)}` +
-                `${Color.gray}, смертей: ${Color.yellow}${deaths}${Color.reset}`,
-        );
-    },
-};
 
 /**
  * Учёт наигранного времени и награды за пороговые значения.
@@ -38,7 +16,6 @@ export const playtimeRewardsMechanic = defineMechanic({
     id: 'playtime_rewards',
     description: 'Учёт времени в игре и награды за наигранные часы.',
     enabledByDefault: true,
-    commands: [statsCommand],
 
     activate(ctx: MechanicContext): void {
         const config = ctx.config.playtime;
