@@ -19,6 +19,7 @@
 | Только проверка типов | `npm run typecheck` |
 | Тесты движка | `npm test` (сборка + прогон на моках API) |
 | Активация пака в мире | `npm run pack:activate` |
+| Установка карты `.mcworld` | `npm run world:install -- <файл> [--yes]` |
 | Проверить порты в `.env` | `npm run check:env` |
 | Поднять сервер | `npm run server:up` (check:env → `docker compose up -d`) |
 | Перезапуск сервера | `npm run server:restart` (`docker restart bds`) |
@@ -53,6 +54,7 @@ MinecraftServer/
 ├── tools/                      # Хостовые скрипты (Node.js/bash — НЕ для движка)
 │                               # env.mjs — общий разбор .env
 │                               # check-env.mjs — сверка портов до запуска
+│                               # install-world.mjs — установка карты .mcworld
 └── deploy/bootstrap-vps.sh     # Первичная настройка дроплета
 ```
 
@@ -159,6 +161,17 @@ MinecraftServer/
 Установку блоков в стабильном API перехватить before-событием нельзя: такого
 события нет. Защита строится на `playerInteractWithBlock` плюс откат в
 `afterEvents.playerPlaceBlock`.
+
+## Миры
+
+`.mcworld` — ZIP с папкой мира; распаковка в `tools/install-world.mjs` сделана
+на `zlib` без внешнего `unzip`, чтобы одинаково работать на macOS и Ubuntu.
+Пути из архива проверяются до первой записи на диск: иначе архив с выходом за
+каталог успел бы переименовать существующий мир и оборваться.
+
+Замена мира стирает весь прогресс движка — балансы, участки и чертежи лежат в
+dynamic properties мира. Прежний мир всегда переименовывается в резервную
+копию, а не удаляется.
 
 ## Служебные предметы
 
