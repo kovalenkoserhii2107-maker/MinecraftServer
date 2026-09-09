@@ -6,6 +6,7 @@ import { deviceMechanic } from './device.js';
 import { economyMechanic } from './economy.js';
 import { plotsMechanic } from './plots.js';
 import { playtimeRewardsMechanic } from './playtimeRewards.js';
+import { warMechanic } from './war.js';
 import { welcomeMechanic } from './welcome.js';
 
 /**
@@ -19,6 +20,7 @@ export const MECHANICS: readonly Mechanic[] = [
     deviceMechanic,
     economyMechanic,
     plotsMechanic,
+    warMechanic,
     blueprintsMechanic,
     welcomeMechanic,
     deathBeaconMechanic,

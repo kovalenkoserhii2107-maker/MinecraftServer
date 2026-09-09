@@ -22,6 +22,7 @@ export interface EngineConfig {
     readonly economy: EconomyConfig;
     readonly plots: PlotsConfig;
     readonly blueprints: BlueprintsConfig;
+    readonly war: WarConfig;
 }
 
 export interface WelcomeConfig {
@@ -137,6 +138,22 @@ export interface BlueprintsConfig {
     readonly maxSize: number;
 }
 
+export interface WarConfig {
+    /** Подготовка после объявления войны, в тиках. 2400 = 2 минуты. */
+    readonly preparationTicks: number;
+    /** Длительность боевых действий, в тиках. */
+    readonly combatTicks: number;
+    /** Частота обновления обратного отсчёта, в тиках. */
+    readonly countdownIntervalTicks: number;
+    /**
+     * Снимать ли защиту участков от взрывов на время войны.
+     *
+     * По умолчанию нет: война длится две минуты, а разрушенная постройка
+     * остаётся навсегда.
+     */
+    readonly allowBlockDamage: boolean;
+}
+
 export const DEFAULT_CONFIG: EngineConfig = {
     logLevel: LogLevel.Info,
     broadcastErrorsToAdmins: true,
@@ -196,6 +213,12 @@ export const DEFAULT_CONFIG: EngineConfig = {
         raycastDistance: 12,
         requireOwnPlot: true,
         maxSize: 64,
+    },
+    war: {
+        preparationTicks: 2400,
+        combatTicks: 2400,
+        countdownIntervalTicks: 20,
+        allowBlockDamage: false,
     },
     device: {
         itemType: 'minecraft:clock',
