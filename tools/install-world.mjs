@@ -15,61 +15,10 @@
  * в dynamic properties этого мира.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve, sep } from 'node:path';
-import { inflateRawSync } from 'node:zlib';
+import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { loadEnv, PROJECT_ROOT } from './env.mjs';
-
-// ------------------------------------------------------------------ чтение ZIP
-
-const EOCD_SIGNATURE = 0x06054b50;
-const CENTRAL_SIGNATURE = 0x02014b50;
-
-/** Записи ZIP из центрального каталога: имя, метод сжатия и смещение. */
-function readZipEntries(buf) {
-    let eocd = -1;
-    for (let i = buf.length - 22; i >= 0 && i > buf.length - 22 - 0xffff; i--) {
-        if (buf.readUInt32LE(i) === EOCD_SIGNATURE) {
-            eocd = i;
-            break;
-        }
-    }
-    if (eocd === -1) throw new Error('это не ZIP-архив: не найден конец центрального каталога');
-
-    const count = buf.readUInt16LE(eocd + 10);
-    let offset = buf.readUInt32LE(eocd + 16);
-
-    const entries = [];
-    for (let i = 0; i < count; i++) {
-        if (buf.readUInt32LE(offset) !== CENTRAL_SIGNATURE) {
-            throw new Error('повреждён центральный каталог архива');
-        }
-        const method = buf.readUInt16LE(offset + 10);
-        const compressedSize = buf.readUInt32LE(offset + 20);
-        const size = buf.readUInt32LE(offset + 24);
-        const nameLength = buf.readUInt16LE(offset + 28);
-        const extraLength = buf.readUInt16LE(offset + 30);
-        const commentLength = buf.readUInt16LE(offset + 32);
-        const localOffset = buf.readUInt32LE(offset + 42);
-        const name = buf.toString('utf8', offset + 46, offset + 46 + nameLength);
-
-        entries.push({ name, method, compressedSize, size, localOffset });
-        offset += 46 + nameLength + extraLength + commentLength;
-    }
-    return entries;
-}
-
-function readEntryData(buf, entry) {
-    // Длины полей в локальном заголовке могут отличаться от центрального.
-    const nameLength = buf.readUInt16LE(entry.localOffset + 26);
-    const extraLength = buf.readUInt16LE(entry.localOffset + 28);
-    const start = entry.localOffset + 30 + nameLength + extraLength;
-    const raw = buf.subarray(start, start + entry.compressedSize);
-
-    if (entry.method === 0) return raw;
-    if (entry.method === 8) return inflateRawSync(raw);
-    throw new Error(`неизвестный метод сжатия ${entry.method} для ${entry.name}`);
-}
+import { planExtraction, readEntryData, readZipEntries, writeExtraction } from './zip.mjs';
 
 // ------------------------------------------------------------- чтение level.dat
 
@@ -233,18 +182,12 @@ if (!confirmed) {
 
 // Пути проверяем ДО первой записи: иначе архив с выходом за каталог успел бы
 // переименовать существующий мир и оборваться, оставив сервер без мира.
-const planned = [];
-for (const entry of entries) {
-    if (!entry.name.startsWith(prefix)) continue;
-    const relative = entry.name.slice(prefix.length);
-    if (relative === '') continue;
-
-    const destination = join(target, relative);
-    if (destination !== target && !destination.startsWith(target + sep)) {
-        console.error(`  Архив отклонён: путь выходит за каталог мира — ${entry.name}`);
-        process.exit(1);
-    }
-    planned.push({ entry, destination, isDirectory: relative.endsWith('/') });
+let planned;
+try {
+    planned = planExtraction(entries, prefix, target);
+} catch (error) {
+    console.error(`  Архив отклонён: ${error.message}`);
+    process.exit(1);
 }
 
 mkdirSync(worldsDir, { recursive: true });
@@ -256,16 +199,7 @@ if (existsSync(target)) {
     console.log(`  Прежний мир сохранён: ${backup}`);
 }
 
-let written = 0;
-for (const { entry, destination, isDirectory } of planned) {
-    if (isDirectory) {
-        mkdirSync(destination, { recursive: true });
-        continue;
-    }
-    mkdirSync(dirname(destination), { recursive: true });
-    writeFileSync(destination, readEntryData(archive, entry));
-    written += 1;
-}
+const written = writeExtraction(archive, planned);
 
 console.log(`  Установлено файлов: ${written}`);
 console.log('');

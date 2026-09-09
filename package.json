@@ -17,6 +17,7 @@
     "watch": "tsc --watch",
     "pack:activate": "node tools/activate-pack.mjs",
     "world:install": "node tools/install-world.mjs",
+    "addon:install": "node tools/install-addon.mjs",
     "check:env": "node tools/check-env.mjs",
     "server:up": "npm run check:env && docker compose up -d",
     "server:down": "docker compose down",

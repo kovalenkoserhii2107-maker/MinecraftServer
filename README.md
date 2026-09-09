@@ -544,6 +544,29 @@ docker compose up -d
   показывает), за её границами будет бесконечная равнина, а не обычный рельеф.
   Для карт-макетов вроде Earth Map это норма.
 
+
+### Сторонние аддоны
+
+```bash
+npm run addon:install -- ~/Downloads/SomeAddon.mcaddon          # разбор, ничего не меняет
+docker compose down
+npm run addon:install -- ~/Downloads/SomeAddon.mcaddon --yes    # установка
+docker compose up -d && npm run server:logs
+```
+
+Без `--yes` скрипт вскрывает архив и печатает то, чего не видно снаружи:
+объявленные версии Script API, `capabilities`, `min_engine_version`, subpacks,
+размер ресурс-пака. Он же предупреждает о совпадении UUID с нашим паком,
+о замене `player.json`, об обфусцированных скриптах и о расхождении версий
+`@minecraft/server`.
+
+Behavior-пак кладётся в `server-data/behavior_packs/`, ресурс-пак — в
+`server-data/resource_packs/`, оба включаются в мире **рядом** с нашим паком:
+`world_behavior_packs.json` дополняется, а не перезаписывается.
+
+Чужие аддоны в репозиторий не кладутся — только устанавливаются на сервер.
+У них своя лицензия, и она обычно запрещает и распространение, и изменение.
+
 ---
 
 ## Диагностика
