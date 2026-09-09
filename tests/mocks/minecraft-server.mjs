@@ -70,6 +70,9 @@ export class Player extends Entity {
     this.messages = []; this.actionBars = []; this.titles = []; this.sounds = [];
     this.xp = 0; this.teleports = []; this.particles = [];
     this.isSneaking = false; this.selectedSlotIndex = 0;
+    // По умолчанию выживание: в творческом часть механик намеренно молчит.
+    this.gameMode = opts.gameMode ?? GameMode.Survival;
+    this.gameModeHistory = [];
     /** Куда «смотрит» игрок: тесты задают результат рейкаста напрямую. */
     this.viewHit = undefined;
     this.container = new ContainerMock(opts.inventorySize ?? 36);
@@ -79,7 +82,8 @@ export class Player extends Entity {
       setTitle: (t, o) => this.titles.push({ t, o }),
     };
   }
-  getGameMode(){ return GameMode.Survival; }
+  getGameMode(){ return this.gameMode; }
+  setGameMode(mode){ this.gameMode = mode; this.gameModeHistory.push(mode); }
   getComponent(id){
     if (id === EntityComponentTypes.Inventory) return { container: this.container };
     if (id === EntityComponentTypes.Health) return this.health;
@@ -143,6 +147,8 @@ class WorldMock extends Props {
     this.beforeEvents = {
       playerBreakBlock: new Signal('playerBreakBlock'),
       playerInteractWithBlock: new Signal('playerInteractWithBlock'),
+      entityHurt: new Signal('entityHurt'),
+      explosion: new Signal('explosion'),
     };
     this.scoreboard = new ScoreboardMock();
     this.structureManager = new StructureManagerMock();

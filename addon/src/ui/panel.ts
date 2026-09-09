@@ -1,4 +1,4 @@
-import { CommandPermissionLevel, system, type Player, GameMode } from '@minecraft/server';
+import { CommandPermissionLevel, GameMode, system, world, type Player } from '@minecraft/server';
 import { ActionFormData, ModalFormData } from '@minecraft/server-ui';
 import { listBlueprints, type Blueprint } from '../core/blueprints.js';
 import {
@@ -12,7 +12,7 @@ import {
     targetOrigin,
 } from '../core/building.js';
 import { formatMoney, getBalance } from '../core/economy.js';
-import { Color, formatCoords, formatDimension, formatMinutes } from '../core/format.js';
+import { Button, Color, formatCoords, formatDimension, formatMinutes } from '../core/format.js';
 import { ensureMarked } from '../core/markedItem.js';
 import { giveStarterKit, returnToDeath } from '../core/playerActions.js';
 import {
@@ -25,6 +25,13 @@ import {
     unclaimPlot,
 } from '../core/plots.js';
 import type { EngineRuntime } from '../core/runtime.js';
+import {
+    announceDeclaration,
+    declareWar,
+    formatCountdown,
+    getWar,
+    secondsLeft,
+} from '../core/war.js';
 import { readNumber, readString, readVector } from '../core/storage.js';
 import { showAction, showModal } from './forms.js';
 
@@ -65,11 +72,12 @@ async function showMainMenu(player: Player, runtime: EngineRuntime): Promise<voi
     const form = new ActionFormData()
         .title('Коммуникатор')
         .body(body)
-        .button(`${Color.green}Территории${Color.gray}\nучастки и карта${Color.reset}`)
-        .button(`${Color.aqua}Строительство${Color.gray}\nчертежи и здания${Color.reset}`)
-        .button(`${Color.yellow}Игрок${Color.gray}\nстатистика и набор${Color.reset}`)
-        .button(`${Color.lightPurple}Система${Color.gray}\nмодули движка${Color.reset}`)
-        .button(`${Color.gray}Закрыть${Color.reset}`);
+        .button(`${Button.good}Территории${Button.note}\nучастки и карта${Color.reset}`)
+        .button(`${Button.primary}Строительство${Button.note}\nчертежи и здания${Color.reset}`)
+        .button(`${Button.primary}Игрок${Button.note}\nстатистика и набор${Color.reset}`)
+        .button(`${Button.danger}Война${Button.note}\n${warHint()}${Color.reset}`)
+        .button(`${Button.accent}Система${Button.note}\nмодули движка${Color.reset}`)
+        .button(`${Button.muted}Закрыть${Color.reset}`);
 
     const response = await showAction(form, player, runtime.log);
     if (!response || response.canceled || response.selection === undefined) return;
@@ -85,6 +93,9 @@ async function showMainMenu(player: Player, runtime: EngineRuntime): Promise<voi
             await showPlayerMenu(player, runtime);
             return;
         case 3:
+            await showWar(player, runtime);
+            return;
+        case 4:
             await showSystem(player, runtime);
             return;
         default:
@@ -113,10 +124,10 @@ async function showTerritories(player: Player, runtime: EngineRuntime): Promise<
         
     const actions: (() => Promise<void> | void)[] = [];
 
-    form.button(`${Color.yellow}Информация об участке${Color.reset}`);
+    form.button(`${Button.primary}Информация об участке${Color.reset}`);
     actions.push(async () => showPlotInfo(player, runtime));
 
-    form.button(`${Color.green}Купить 16×16${Color.gray}\n${formatMoney(config.cost16, symbol)}${Color.reset}`);
+    form.button(`${Button.good}Купить 16×16${Button.note}\n${formatMoney(config.cost16, symbol)}${Color.reset}`);
     actions.push(() => {
         apply(() => {
             if (!player.isValid) return;
@@ -125,7 +136,7 @@ async function showTerritories(player: Player, runtime: EngineRuntime): Promise<
         });
     });
 
-    form.button(`${Color.green}Купить 32×32${Color.gray}\n${formatMoney(config.cost32, symbol)}${Color.reset}`);
+    form.button(`${Button.good}Купить 32×32${Button.note}\n${formatMoney(config.cost32, symbol)}${Color.reset}`);
     actions.push(() => {
         apply(() => {
             if (!player.isValid) return;
@@ -137,7 +148,7 @@ async function showTerritories(player: Player, runtime: EngineRuntime): Promise<
     const isMine = owner?.id === player.id;
     if (isMine) {
         const refund = Math.floor(config.cost16 * config.refundRatio);
-        form.button(`${Color.red}Продать участок${Color.gray}\n+${formatMoney(refund, symbol)}${Color.reset}`);
+        form.button(`${Button.danger}Продать участок${Button.note}\n+${formatMoney(refund, symbol)}${Color.reset}`);
         actions.push(() => {
             apply(() => {
                 if (!player.isValid) return;
@@ -148,7 +159,7 @@ async function showTerritories(player: Player, runtime: EngineRuntime): Promise<
     }
 
     const showBorders = player.getDynamicProperty('mc:show_plot_borders') === true;
-    form.button(`${Color.lightPurple}${showBorders ? 'Скрыть' : 'Показать'} границы${Color.gray}\nчужих и своих участков${Color.reset}`);
+    form.button(`${Button.accent}${showBorders ? 'Скрыть' : 'Показать'} границы${Button.note}\nчужих и своих участков${Color.reset}`);
     actions.push(() => {
         apply(() => {
             if (!player.isValid) return;
@@ -157,7 +168,7 @@ async function showTerritories(player: Player, runtime: EngineRuntime): Promise<
         });
     });
 
-    form.button(`${Color.gray}Назад${Color.reset}`);
+    form.button(`${Button.muted}Назад${Color.reset}`);
     actions.push(async () => showMainMenu(player, runtime));
 
     const response = await showAction(form, player, runtime.log);
@@ -192,7 +203,7 @@ async function showPlotInfo(player: Player, runtime: EngineRuntime): Promise<voi
     const form = new ActionFormData()
         .title('Информация об участке')
         .body(body)
-        .button(`${Color.gray}Назад${Color.reset}`);
+        .button(`${Button.muted}Назад${Color.reset}`);
 
     await showAction(form, player, runtime.log);
     await showTerritories(player, runtime);
@@ -215,10 +226,10 @@ async function showBuilding(player: Player, runtime: EngineRuntime): Promise<voi
 
     const actions: (() => Promise<void> | void)[] = [];
 
-    form.button(`${Color.aqua}Каталог зданий${Color.reset}`);
+    form.button(`${Button.primary}Каталог зданий${Color.reset}`);
     actions.push(async () => showCatalog(player, runtime));
 
-    form.button(`${Color.yellow}Получить чертёж${Color.reset}`);
+    form.button(`${Button.good}Получить чертёж${Color.reset}`);
     actions.push(() => {
         apply(() => {
             if (!player.isValid) return;
@@ -238,15 +249,15 @@ async function showBuilding(player: Player, runtime: EngineRuntime): Promise<voi
         });
     });
 
-    form.button(`${Color.green}Сохранить чертёж${Color.gray}\nиз отмеченной области${Color.reset}`);
+    form.button(`${Button.good}Сохранить чертёж${Button.note}\nиз отмеченной области${Color.reset}`);
     actions.push(async () => showSaveBlueprint(player, runtime));
 
-    if (isAdmin(player)) {
-        form.button(`${Color.red}Удалить чертёж${Color.reset}`);
-        actions.push(async () => showDeleteBlueprint(player, runtime));
-    }
+    // Сохранять чертежи может любой игрок, поэтому и удалять тоже: иначе
+    // ошибочно созданный чертёж остаётся в каталоге навсегда.
+    form.button(`${Button.danger}Удалить чертёж${Color.reset}`);
+    actions.push(async () => showDeleteBlueprint(player, runtime));
 
-    form.button(`${Color.gray}Назад${Color.reset}`);
+    form.button(`${Button.muted}Назад${Color.reset}`);
     actions.push(async () => showMainMenu(player, runtime));
 
     const response = await showAction(form, player, runtime.log);
@@ -268,7 +279,7 @@ export async function showCatalog(player: Player, runtime: EngineRuntime): Promi
                 `${Color.gray}Чертежей пока нет.\n\nОператор создаёт их так: построить здание, ` +
                     `отметить два угла приседом с чертежом, затем «Строительство → Сохранить чертёж».${Color.reset}`,
             )
-            .button(`${Color.gray}Назад${Color.reset}`);
+            .button(`${Button.muted}Назад${Color.reset}`);
         await showAction(empty, player, runtime.log);
         return;
     }
@@ -281,7 +292,7 @@ export async function showCatalog(player: Player, runtime: EngineRuntime): Promi
             `${blueprint.name}\n${blueprint.sizeX}×${blueprint.sizeY}×${blueprint.sizeZ} — ${formatMoney(blueprint.price, symbol)}`
         );
     }
-    form.button(`Назад`);
+    form.button(`${Button.muted}Назад${Color.reset}`);
 
     const response = await showAction(form, player, runtime.log);
     if (!response || response.canceled || response.selection === undefined) return;
@@ -321,8 +332,8 @@ export async function showConfirmPlacement(player: Player, blueprint: Blueprint,
                 affordable ? `Средств достаточно` : `Не хватает средств`,
             ].join('\n'),
         )
-        .button(canBuild ? `Построить` : `Построить нельзя`)
-        .button(`Отмена`);
+        .button(canBuild ? `${Button.good}Построить${Color.reset}` : `${Button.muted}Построить нельзя${Color.reset}`)
+        .button(`${Button.muted}Отмена${Color.reset}`);
 
     const decision = await showAction(confirm, player, runtime.log);
     if (!decision || decision.canceled || decision.selection !== 0 || !canBuild) return;
@@ -350,7 +361,7 @@ async function showSaveBlueprint(player: Player, runtime: EngineRuntime): Promis
                     `${Color.gray}Возьмите чертёж, присядьте и используйте предмет по двум ` +
                     `противоположным углам постройки, затем вернитесь сюда.${Color.reset}`,
             )
-            .button(`${Color.gray}Назад${Color.reset}`);
+            .button(`${Button.muted}Назад${Color.reset}`);
         await showAction(hint, player, runtime.log);
         await showBuilding(player, runtime);
         return;
@@ -392,8 +403,8 @@ async function showDeleteBlueprint(player: Player, runtime: EngineRuntime): Prom
     }
 
     const form = new ActionFormData().title('Удалить чертёж').body(`${Color.gray}Действие необратимо.${Color.reset}`);
-    for (const blueprint of blueprints) form.button(`${Color.red}${blueprint.name}${Color.reset}`);
-    form.button(`${Color.gray}Назад${Color.reset}`);
+    for (const blueprint of blueprints) form.button(`${Button.danger}${blueprint.name}${Color.reset}`);
+    form.button(`${Button.muted}Назад${Color.reset}`);
 
     const response = await showAction(form, player, runtime.log);
     if (!response || response.canceled || response.selection === undefined) return;
@@ -440,9 +451,9 @@ async function showPlayerMenu(player: Player, runtime: EngineRuntime): Promise<v
             ? `${Color.aqua}Вернуться к месту смерти${Color.reset}`
             : `${Color.darkGray}Возврат недоступен${Color.reset}`,
     );
-    form.button(`${Color.yellow}Стартовый набор${Color.reset}`);
-    form.button(`${Color.aqua}Режим игры${Color.gray}\nвыживание / творческий${Color.reset}`);
-    form.button(`${Color.gray}Назад${Color.reset}`);
+    form.button(`${Button.good}Стартовый набор${Color.reset}`);
+    form.button(`${Button.primary}Режим игры${Button.note}\nвыживание / творческий${Color.reset}`);
+    form.button(`${Button.muted}Назад${Color.reset}`);
 
     const response = await showAction(form, player, runtime.log);
     if (!response || response.canceled || response.selection === undefined) return;
@@ -483,6 +494,119 @@ async function showPlayerMenu(player: Player, runtime: EngineRuntime): Promise<v
     await showMainMenu(player, runtime);
 }
 
+
+// ------------------------------------------------------------------------ война
+
+/** Подпись под кнопкой «Война» в главном меню. */
+function warHint(): string {
+    const war = getWar();
+    if (!war) return 'объявить и воевать';
+    return war.phase === 'preparation'
+        ? `подготовка ${formatCountdown(secondsLeft())}`
+        : `идёт бой ${formatCountdown(secondsLeft())}`;
+}
+
+async function showWar(player: Player, runtime: EngineRuntime): Promise<void> {
+    const config = runtime.config.war;
+    const war = getWar();
+
+    if (war) {
+        const phase = war.phase === 'preparation' ? 'Подготовка' : 'Идёт бой';
+        const body = [
+            `${Color.gray}Стороны: ${Color.yellow}${war.attacker.name}${Color.gray} против ` +
+                `${Color.yellow}${war.defender.name}${Color.reset}`,
+            `${Color.gray}Этап: ${Color.red}${phase}${Color.reset}`,
+            `${Color.gray}Осталось: ${Color.red}${formatCountdown(secondsLeft())}${Color.reset}`,
+            '',
+            war.phase === 'preparation'
+                ? `${Color.gray}Когда отсчёт кончится, защита от урона снимется между вами двумя,` +
+                  `\nи оба перейдёте в выживание.${Color.reset}`
+                : `${Color.gray}Защита снята. По окончании боя режим игры вернётся прежним.${Color.reset}`,
+        ].join('\n');
+
+        const form = new ActionFormData()
+            .title('Война')
+            .body(body)
+            .button(`${Button.muted}Назад${Color.reset}`);
+        await showAction(form, player, runtime.log);
+        await showMainMenu(player, runtime);
+        return;
+    }
+
+    const minutes = Math.round(config.preparationTicks / 20 / 60);
+    const combatMinutes = Math.round(config.combatTicks / 20 / 60);
+    const body = [
+        `${Color.gray}Сейчас мир: игроки не наносят друг другу урона.${Color.reset}`,
+        '',
+        `${Color.gray}После объявления у обеих сторон ${Color.yellow}${minutes} мин${Color.gray} на подготовку.`,
+        `${Color.gray}Затем ${Color.yellow}${combatMinutes} мин${Color.gray} боя: защита снимается,`,
+        `${Color.gray}оба переходят в выживание. После — всё как было и итоги.${Color.reset}`,
+    ].join('\n');
+
+    const form = new ActionFormData()
+        .title('Война')
+        .body(body)
+        .button(`${Button.danger}Объявить войну${Color.reset}`)
+        .button(`${Button.muted}Назад${Color.reset}`);
+
+    const response = await showAction(form, player, runtime.log);
+    if (!response || response.canceled || response.selection !== 0) {
+        if (response && !response.canceled) await showMainMenu(player, runtime);
+        return;
+    }
+    await showDeclareWar(player, runtime);
+}
+
+async function showDeclareWar(player: Player, runtime: EngineRuntime): Promise<void> {
+    // Воевать можно только с тем, кто сейчас в игре: подготовка и бой идут в
+    // реальном времени, и отсутствующий игрок просто потерял бы её вслепую.
+    const targets = world.getAllPlayers().filter((other) => other.isValid && other.id !== player.id);
+
+    if (targets.length === 0) {
+        const empty = new ActionFormData()
+            .title('Объявить войну')
+            .body(`${Color.gray}На сервере больше никого нет.${Color.reset}`)
+            .button(`${Button.muted}Назад${Color.reset}`);
+        await showAction(empty, player, runtime.log);
+        return;
+    }
+
+    const form = new ActionFormData()
+        .title('Объявить войну')
+        .body(`${Color.gray}Кому объявляем войну?${Color.reset}`);
+    for (const target of targets) form.button(`${Button.danger}${target.name}${Color.reset}`);
+    form.button(`${Button.muted}Отмена${Color.reset}`);
+
+    const response = await showAction(form, player, runtime.log);
+    if (!response || response.canceled || response.selection === undefined) return;
+
+    const target = targets[response.selection];
+    if (!target) return;
+
+    const confirm = new ActionFormData()
+        .title('Подтверждение')
+        .body(
+            `${Color.gray}Объявить войну игроку ${Color.yellow}${target.name}${Color.gray}?` +
+                `\n\nОтменить объявление будет нельзя.${Color.reset}`,
+        )
+        .button(`${Button.danger}Объявить${Color.reset}`)
+        .button(`${Button.muted}Отмена${Color.reset}`);
+
+    const decision = await showAction(confirm, player, runtime.log);
+    if (!decision || decision.canceled || decision.selection !== 0) return;
+
+    apply(() => {
+        if (!player.isValid || !target.isValid) return;
+        const result = declareWar(player, target, runtime.config.war);
+        if (!result.ok) {
+            player.sendMessage(`${Color.red}${result.message}${Color.reset}`);
+            return;
+        }
+        announceDeclaration(player, target, runtime.config.war);
+        runtime.log.info(`${player.name} объявил войну ${target.name}.`);
+    });
+}
+
 // --------------------------------------------------------------------- система
 
 async function showSystem(player: Player, runtime: EngineRuntime): Promise<void> {
@@ -501,9 +625,9 @@ async function showSystem(player: Player, runtime: EngineRuntime): Promise<void>
     const form = new ActionFormData().title('Система').body(body);
     for (const entry of entries) {
         const state = entry.active ? `${Color.green}вкл` : `${Color.red}выкл`;
-        form.button(`${entry.id}  ${state}${Color.gray}\n${entry.description}${Color.reset}`);
+        form.button(`${Button.primary}${entry.id}  ${state}${Button.note}\n${entry.description}${Color.reset}`);
     }
-    form.button(`${Color.gray}Назад${Color.reset}`);
+    form.button(`${Button.muted}Назад${Color.reset}`);
 
     const response = await showAction(form, player, runtime.log);
     if (!response || response.canceled || response.selection === undefined) return;
