@@ -59,7 +59,13 @@ export class Block {
   get location(){ return { x: this.x, y: this.y, z: this.z }; }
   setType(typeId){ this.typeId = typeId; }
 }
-export class Entity extends Props {}
+export class Entity extends Props {
+  constructor() { super(); this.tags = new Set(); }
+  hasTag(t) { return this.tags.has(t); }
+  addTag(t) { this.tags.add(t); return true; }
+  removeTag(t) { return this.tags.delete(t); }
+  getTags() { return [...this.tags]; }
+}
 export class Player extends Entity {
   constructor(name, opts = {}){
     super();
@@ -112,6 +118,7 @@ class ScoreboardMock {
   addObjective(id, displayName){ const o = new ObjectiveMock(id, displayName); this.objectives.set(id, o); return o; }
   getObjective(id){ return this.objectives.get(id); }
   setObjectiveAtDisplaySlot(slot, options){ this.slots.set(slot, options.objective); }
+  getObjectiveAtDisplaySlot(slot){ const o = this.slots.get(slot); return o ? { objective: o } : undefined; }
   clearObjectiveAtDisplaySlot(slot){ const o = this.slots.get(slot); this.slots.delete(slot); return o; }
 }
 

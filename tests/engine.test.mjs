@@ -356,10 +356,10 @@ await openPanel(alice, [4]);   // 0 территории, 1 строительс
 check('раздел «Система» перечисляет модули с состоянием', () => {
     const menu = __shown.find((f) => f.title === 'Система');
     assert.ok(menu, 'раздел не открылся');
-    assert.equal(menu.buttons.length, 10, 'ожидались 9 модулей и кнопка «Назад»');
+    assert.equal(menu.buttons.length, 11, 'ожидались 9 модулей, кнопка табло и кнопка «Назад»');
     assert.ok(menu.body.includes('9'), menu.body);
 });
-await openPanel(alice, [4, 0]);                     // Система -> первый модуль
+await openPanel(alice, [4, 1]);                     // Система -> первый модуль (device)
 check('оператор переключает модуль из панели', () => {
     assert.equal(world.getDynamicProperty('mc:mechanic.device.enabled'), false);
 });
@@ -374,7 +374,7 @@ check('выключенный модуль перестаёт реагирова
 });
 
 // Включаем обратно и убеждаемся, что реакция вернулась.
-await openPanelRaw(alice, [4, 0]);
+await openPanelRaw(alice, [4, 1]);
 __reset();
 __queueResponses([]);
 world.afterEvents.itemUse.emit({ itemStack: deviceOf(alice), source: alice });
@@ -440,24 +440,23 @@ alice.setGameMode('Creative');
 bob.setGameMode('Creative');
 alice.titles.length = 0;
 bob.titles.length = 0;
-await openPanel(alice, [3, 0, 0, 0]);               // Война -> Объявить -> Bob -> Подтвердить
+await openPanel(alice, [3, 0, 0], [[0]]);               // Война -> Объявить -> Bob -> Подтвердить
 
 check('цель получает уведомление на весь экран', () => {
-    const notice = bob.titles.at(-1);
+    const notice = bob.titles.find(n => n.t.includes('объявлена война'));
     assert.ok(notice, 'уведомление не показано');
-    assert.ok(notice.t.includes('объявлена война'), notice.t);
     assert.ok(notice.o.subtitle.includes('Alice'), notice.o.subtitle);
     assert.ok(notice.o.subtitle.includes('2 мин'), notice.o.subtitle);
 });
 check('объявивший тоже видит уведомление', () => {
-    assert.ok(alice.titles.at(-1).t.includes('Война объявлена'));
+    assert.ok(alice.titles.some(n => n.t.includes('Война объявлена')));
 });
 
 // --- 10d. Подготовка ---
-alice.actionBars.length = 0;
+alice.titles.length = 0;
 system.advance(20);
 check('идёт обратный отсчёт красными цифрами', () => {
-    const bar = alice.actionBars.at(-1);
+    const bar = alice.titles.map(n => n.o?.subtitle).filter(Boolean).at(-1);
     assert.ok(bar, 'отсчёт не показан');
     assert.ok(bar.includes('§c'), 'цифры не красные');
     assert.ok(/\d:\d\d/.test(bar), bar);
@@ -480,7 +479,7 @@ system.advance(2400);                                // подготовка в�
 check('бой начался: оба переведены в выживание', () => {
     assert.equal(alice.gameMode, 'Survival', 'режим не сменился на боевой');
     assert.equal(bob.gameMode, 'Survival');
-    assert.ok(alice.titles.at(-1).t.includes('Бой начался'), alice.titles.at(-1).t);
+    assert.ok(alice.titles.some(n => n.t.includes('Бой начался')), 'уведомление не найдено');
 });
 check('во время боя урон между сторонами проходит', () => {
     assert.equal(hurt(bob, alice), false);
@@ -502,9 +501,8 @@ alice.titles.length = 0;
 alice.messages.length = 0;
 system.advance(2400);
 check('война окончена: уведомление и итоги', () => {
-    const notice = alice.titles.at(-1);
+    const notice = alice.titles.find(n => n.t.includes('Война окончена'));
     assert.ok(notice, 'итогового уведомления нет');
-    assert.ok(notice.t.includes('Война окончена'), notice.t);
     assert.ok(notice.o.subtitle.includes('Alice'), notice.o.subtitle);
     assert.ok(alice.messages.some((m) => m.includes('2 : 1')), alice.messages.join(' | '));
 });
@@ -519,13 +517,13 @@ check('PvP-защита возобновлена', () => {
 
 // --- 10g. Война прерывается выходом участника ---
 bob.titles.length = 0;
-await openPanel(alice, [3, 0, 0, 0]);
+await openPanel(alice, [3, 0, 0], [[0]]);
 system.advance(20);
-check('война снова объявлена', () => assert.ok(bob.titles.at(-1).t.includes('объявлена война')));
+check('война снова объявлена', () => assert.ok(bob.titles.some(n => n.t.includes('объявлена война'))));
 world.afterEvents.playerLeave.emit({ playerId: bob.id, playerName: 'Bob' });
 system.advance(20);
 check('выход участника прекращает войну', () => {
-    assert.ok(alice.titles.at(-1).t.includes('прервана'), alice.titles.at(-1).t);
+    assert.ok(alice.titles.some(n => n.t.includes('прервана')), 'уведомления нет');
     assert.equal(hurt(bob, alice), true, 'защита не вернулась');
 });
 check('после прерывания режим игры тоже восстановлен', () => {

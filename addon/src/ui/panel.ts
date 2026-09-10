@@ -1,4 +1,4 @@
-import { CommandPermissionLevel, GameMode, system, world, type Player } from '@minecraft/server';
+import { CommandPermissionLevel, DisplaySlotId, GameMode, ObjectiveSortOrder, system, world, type Player } from '@minecraft/server';
 import { ActionFormData, ModalFormData } from '@minecraft/server-ui';
 import { listBlueprints, type Blueprint } from '../core/blueprints.js';
 import {
@@ -453,6 +453,10 @@ async function showPlayerMenu(player: Player, runtime: EngineRuntime): Promise<v
     );
     form.button(`${Button.good}Стартовый набор${Color.reset}`);
     form.button(`${Button.primary}Режим игры${Button.note}\nвыживание / творческий${Color.reset}`);
+    
+    const isMapActive = player.hasTag('mc:minimap_active');
+    form.button(`${Button.primary}Мини-карта (Внизу)\n${isMapActive ? `${Color.green}вкл` : `${Color.red}выкл`}${Color.reset}`);
+
     form.button(`${Button.muted}Назад${Color.reset}`);
 
     const response = await showAction(form, player, runtime.log);
@@ -489,6 +493,18 @@ async function showPlayerMenu(player: Player, runtime: EngineRuntime): Promise<v
                 player.sendMessage(`${Color.red}Не удалось сменить режим игры.${Color.reset}`);
             }
         });
+        return;
+    }
+    if (response.selection === 3) {
+        apply(() => {
+            if (isMapActive) {
+                player.removeTag('mc:minimap_active');
+                player.onScreenDisplay.setActionBar('');
+            } else {
+                player.addTag('mc:minimap_active');
+            }
+        });
+        await showPlayerMenu(player, runtime);
         return;
     }
     await showMainMenu(player, runtime);
@@ -583,27 +599,27 @@ async function showDeclareWar(player: Player, runtime: EngineRuntime): Promise<v
     const target = targets[response.selection];
     if (!target) return;
 
-    const confirm = new ActionFormData()
-        .title('Подтверждение')
-        .body(
-            `${Color.gray}Объявить войну игроку ${Color.yellow}${target.name}${Color.gray}?` +
-                `\n\nОтменить объявление будет нельзя.${Color.reset}`,
-        )
-        .button(`${Button.danger}Объявить${Color.reset}`)
-        .button(`${Button.muted}Отмена${Color.reset}`);
+    const confirm = new ModalFormData()
+        .title('Подтверждение войны')
+        .dropdown(`Объявить войну игроку ${target.name}?\n\nОтменить объявление будет нельзя.\n\nВремя боя:`, ['2 минуты', '5 минут'], { defaultValueIndex: 0 })
+        .submitButton(`${Color.red}Объявить${Color.reset}`);
 
-    const decision = await showAction(confirm, player, runtime.log);
-    if (!decision || decision.canceled || decision.selection !== 0) return;
+    const decision = await showModal(confirm, player, runtime.log);
+    if (!decision || decision.canceled || !decision.formValues) return;
+
+    const durationMins = decision.formValues[0] === 0 ? 2 : 5;
+    const combatTicks = durationMins * 60 * 20;
+    const configOverride = { ...runtime.config.war, combatTicks };
 
     apply(() => {
         if (!player.isValid || !target.isValid) return;
-        const result = declareWar(player, target, runtime.config.war);
+        const result = declareWar(player, target, configOverride);
         if (!result.ok) {
             player.sendMessage(`${Color.red}${result.message}${Color.reset}`);
             return;
         }
-        announceDeclaration(player, target, runtime.config.war);
-        runtime.log.info(`${player.name} объявил войну ${target.name}.`);
+        announceDeclaration(player, target, configOverride);
+        runtime.log.info(`${player.name} объявил войну ${target.name} на ${durationMins} мин.`);
     });
 }
 
@@ -623,6 +639,12 @@ async function showSystem(player: Player, runtime: EngineRuntime): Promise<void>
     ].join('\n');
 
     const form = new ActionFormData().title('Система').body(body);
+    
+    const economyEntry = entries.find(e => e.id === 'economy');
+    if (economyEntry && economyEntry.active) {
+        form.button(`${Button.primary}Табло (справа)\nвкл / выкл${Color.reset}`);
+    }
+
     for (const entry of entries) {
         const state = entry.active ? `${Color.green}вкл` : `${Color.red}выкл`;
         form.button(`${Button.primary}${entry.id}  ${state}${Button.note}\n${entry.description}${Color.reset}`);
@@ -632,7 +654,43 @@ async function showSystem(player: Player, runtime: EngineRuntime): Promise<void>
     const response = await showAction(form, player, runtime.log);
     if (!response || response.canceled || response.selection === undefined) return;
 
-    const selected = entries[response.selection];
+    const hasEconomyBtn = economyEntry && economyEntry.active;
+    const backBtnIndex = hasEconomyBtn ? entries.length + 1 : entries.length;
+
+    if (response.selection === backBtnIndex) {
+        await showMainMenu(player, runtime);
+        return;
+    }
+
+    if (hasEconomyBtn && response.selection === 0) {
+        if (!admin) {
+            await showSystem(player, runtime);
+            return;
+        }
+        apply(() => {
+            const currentObj = world.scoreboard.getObjective('mc_balance');
+            const displayObj = world.scoreboard.getObjectiveAtDisplaySlot(DisplaySlotId.Sidebar)?.objective;
+            const hasDisplay = displayObj && currentObj && displayObj.id === currentObj.id;
+            
+            if (hasDisplay) {
+                try { world.scoreboard.clearObjectiveAtDisplaySlot(DisplaySlotId.Sidebar); } catch {}
+                player.sendMessage(`${Color.green}Табло скрыто.${Color.reset}`);
+            } else {
+                try { 
+                    world.scoreboard.setObjectiveAtDisplaySlot(DisplaySlotId.Sidebar, {
+                        objective: currentObj!,
+                        sortOrder: ObjectiveSortOrder.Descending,
+                    });
+                } catch {}
+                player.sendMessage(`${Color.green}Табло отображается.${Color.reset}`);
+            }
+        });
+        await showSystem(player, runtime);
+        return;
+    }
+
+    const selectedIdx = hasEconomyBtn ? response.selection - 1 : response.selection;
+    const selected = entries[selectedIdx];
     if (!selected || !admin) {
         await showMainMenu(player, runtime);
         return;

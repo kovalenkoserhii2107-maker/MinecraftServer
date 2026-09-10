@@ -1,8 +1,10 @@
-import { Player, system, world } from '@minecraft/server';
+import { GameMode, Player, system, world } from '@minecraft/server';
 import { failure, info } from '../core/format.js';
 import { formatMoney, payTo } from '../core/economy.js';
 import { defineMechanic, type MechanicContext } from '../core/mechanic.js';
-import { chunkAt, getOwner, listOwnedChunks, chunkOutline } from '../core/plots.js';
+import { chunkAt, getOwner, listOwnedChunks, chunkOutline, renderPlotMap } from '../core/plots.js';
+import { isCombatant } from '../core/war.js';
+import { Color } from '../core/format.js';
 
 
 /** Отказы приходят пачками (зажатая кнопка) — не спамим чат. */
@@ -48,6 +50,44 @@ export const plotsMechanic = defineMechanic({
 
     activate(ctx: MechanicContext): void {
         const config = ctx.config.plots;
+
+        const storedGameModes = new Map<string, GameMode>();
+
+        ctx.store.runInterval('plotGameMode', 10, () => {
+            for (const player of world.getAllPlayers()) {
+                if (!player.isValid) continue;
+                if (isCombatant(player.id)) continue;
+
+                const center = chunkAt(player.dimension.id, player.location.x, player.location.z);
+                const owner = getOwner(center);
+                const isForeign = owner && owner.id !== player.id;
+
+                if (isForeign) {
+                    if (player.getGameMode() !== GameMode.Adventure) {
+                        storedGameModes.set(player.id, player.getGameMode());
+                        try { player.setGameMode(GameMode.Adventure); } catch {}
+                    }
+                } else {
+                    if (player.getGameMode() === GameMode.Adventure && storedGameModes.has(player.id)) {
+                        const mode = storedGameModes.get(player.id)!;
+                        try { player.setGameMode(mode); } catch {}
+                        storedGameModes.delete(player.id);
+                    }
+                }
+            }
+        });
+
+        ctx.store.runInterval('minimap', 20, () => {
+            for (const player of world.getAllPlayers()) {
+                if (!player.isValid || !player.hasTag('mc:minimap_active')) continue;
+                const mapStr = renderPlotMap(player, config.mapRadius);
+                const legend = `${Color.green}█${Color.gray} ваше ${Color.red}█${Color.gray} чужое ` +
+                    `${Color.darkGray}░${Color.gray} своб ${Color.yellow}▣${Color.gray} вы${Color.reset}`;
+                try {
+                    player.onScreenDisplay.setActionBar(mapStr + '\n' + legend);
+                } catch {}
+            }
+        });
 
         ctx.store.subscribe(world.beforeEvents.playerBreakBlock, 'breakBlock', (event) => {
             const block = event.block;
@@ -169,8 +209,12 @@ export const plotsMechanic = defineMechanic({
 
         ctx.store.subscribe(world.afterEvents.playerLeave, 'playerLeave', (event) => {
             lastWarning.delete(event.playerId);
+            storedGameModes.delete(event.playerId);
         });
-        ctx.store.add(() => lastWarning.clear());
+        ctx.store.add(() => {
+            lastWarning.clear();
+            storedGameModes.clear();
+        });
     },
 });
 

@@ -137,10 +137,12 @@ export const warMechanic = defineMechanic({
             const seconds = secondsLeft();
             const label = war.phase === 'preparation' ? 'До боя' : 'Бой';
             eachCombatant(war, (player) => {
-                // Строка действия — единственный постоянный текст внизу по центру.
-                player.onScreenDisplay.setActionBar(
-                    `${Color.gray}${label}  ${Color.red}${Color.bold}${formatCountdown(seconds)}${Color.reset}`,
-                );
+                player.onScreenDisplay.setTitle(' ', {
+                    subtitle: `${Color.gray}${label}  ${Color.red}${Color.bold}${formatCountdown(seconds)}${Color.reset}`,
+                    fadeInDuration: 0,
+                    stayDuration: 25,
+                    fadeOutDuration: 0,
+                });
             });
         });
 
@@ -157,7 +159,7 @@ export const warMechanic = defineMechanic({
 
 function clearCountdown(player: Player): void {
     try {
-        player.onScreenDisplay.setActionBar('');
+        player.onScreenDisplay.setTitle(' ', { subtitle: ' ', stayDuration: 0, fadeInDuration: 0, fadeOutDuration: 0 });
     } catch {
         // Игрок уже вышел.
     }
